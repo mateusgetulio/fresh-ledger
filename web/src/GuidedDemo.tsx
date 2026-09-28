@@ -1,6 +1,8 @@
-import { useState } from "react";
-import type { DemoAction, DemoOffsets } from "@fresh-ledger/shared";
-import type { DashboardData } from "./api";
+import { useEffect, useState } from "react";
+import type { DeliveryRecord, DemoAction, DemoOffsets } from "@fresh-ledger/shared";
+import { fetchDelivery, type DashboardData } from "./api";
+import { DuplicateEvidence } from "./DuplicateEvidence";
+import { snapshotOf, type MetricsSnapshot } from "./snapshot";
 import {
   FINISH,
   guidedView,
@@ -22,7 +24,27 @@ export interface GuidedDemoProps {
 export function GuidedDemo({ state, data, offsets, dispatch, run, restart }: GuidedDemoProps) {
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [before, setBefore] = useState<MetricsSnapshot | null>(null);
+  const [delivery, setDelivery] = useState<DeliveryRecord | null>(null);
   const view = guidedView(state, data, offsets);
+  const replayed =
+    state.step === 5 &&
+    data !== null &&
+    data.current.status === "current" &&
+    data.current.checkpoint_offset >= offsets.duplicate_offset;
+
+  useEffect(() => {
+    if (!replayed || delivery !== null) return;
+    let cancelled = false;
+    fetchDelivery(offsets.duplicate_offset)
+      .then((record) => {
+        if (!cancelled) setDelivery(record);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [replayed, delivery, offsets.duplicate_offset]);
 
   const attempt = async (work: () => Promise<void>) => {
     setBusy(true);
@@ -40,6 +62,7 @@ export function GuidedDemo({ state, data, offsets, dispatch, run, restart }: Gui
   const onPrimary = () => {
     if (!primary) return;
     void attempt(async () => {
+      if (primary.actions.includes("replay-duplicate") && data) setBefore(snapshotOf(data));
       for (const action of primary.actions) await run(action);
       if (primary.next !== null) dispatch({ type: "go_to", step: primary.next });
       else if (primary.label === "Show history") {
@@ -92,6 +115,9 @@ export function GuidedDemo({ state, data, offsets, dispatch, run, restart }: Gui
         <p key={line}>{line}</p>
       ))}
       {view.line ? <p className="guided-line">{view.line}</p> : null}
+      {replayed && data ? (
+        <DuplicateEvidence before={before} after={snapshotOf(data)} delivery={delivery} />
+      ) : null}
       <h3>Why it matters</h3>
       {view.why.map((line) => (
         <p key={line}>{line}</p>

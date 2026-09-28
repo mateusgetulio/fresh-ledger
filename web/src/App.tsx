@@ -23,12 +23,25 @@ export function App({ pollIntervalMs }: { pollIntervalMs?: number } = {}) {
       window.history.replaceState(null, "", hash || window.location.pathname);
   }, [guided]);
 
+  const [offsetsAttempt, setOffsetsAttempt] = useState(0);
   useEffect(() => {
-    if (guided && offsets === null)
-      fetchDemoInfo()
-        .then((info) => setOffsets(info.offsets))
-        .catch(() => dispatch({ type: "left" }));
-  }, [guided, offsets]);
+    if (!guided || offsets !== null) return;
+    let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | null = null;
+    fetchDemoInfo()
+      .then((info) => {
+        if (!cancelled) setOffsets(info.offsets);
+      })
+      .catch(() => {
+        retry = setTimeout(() => {
+          if (!cancelled) setOffsetsAttempt((n) => n + 1);
+        }, 1000);
+      });
+    return () => {
+      cancelled = true;
+      if (retry !== null) clearTimeout(retry);
+    };
+  }, [guided, offsets, offsetsAttempt]);
 
   const start = useCallback(async () => {
     setStarting(true);

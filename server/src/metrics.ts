@@ -1,5 +1,11 @@
 import type pg from "pg";
-import type { CurrentMetrics, MonthMetrics, Money, Restatement } from "@fresh-ledger/shared";
+import type {
+  CurrentMetrics,
+  DeliveryRecord,
+  MonthMetrics,
+  Money,
+  Restatement,
+} from "@fresh-ledger/shared";
 import { monthStart } from "./consumer.js";
 import { restatementSentence, type RestatementRow } from "./restatements.js";
 
@@ -117,6 +123,32 @@ async function readHistory(db: Queryable): Promise<MonthMetrics[]> {
     });
   }
   return history;
+}
+
+export async function deliveryAt(db: Queryable, offset: number): Promise<DeliveryRecord | null> {
+  const { rows } = await db.query<{
+    source_offset: string;
+    source_received_at: Date;
+    event_id: string;
+    result: DeliveryRecord["result"];
+    result_detail: string | null;
+    first_source_offset: string | null;
+  }>(
+    `SELECT d.source_offset, d.source_received_at, d.event_id, d.result, d.result_detail, e.first_source_offset
+     FROM source_deliveries d LEFT JOIN events e ON e.event_id = d.event_id
+     WHERE d.source_offset = $1`,
+    [offset],
+  );
+  const row = rows[0];
+  if (row === undefined) return null;
+  return {
+    source_offset: Number(row.source_offset),
+    source_received_at: row.source_received_at.toISOString(),
+    event_id: row.event_id,
+    result: row.result,
+    result_detail: row.result_detail,
+    first_source_offset: row.first_source_offset === null ? null : Number(row.first_source_offset),
+  };
 }
 
 export async function restatements(db: Queryable): Promise<Restatement[]> {

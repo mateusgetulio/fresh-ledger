@@ -1,5 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { CurrentMetrics, DemoInfo, MonthMetrics, Restatement } from "@fresh-ledger/shared";
+import type {
+  CurrentMetrics,
+  DeliveryRecord,
+  DemoInfo,
+  MonthMetrics,
+  Restatement,
+} from "@fresh-ledger/shared";
 import { createApp } from "../src/app.js";
 import { processBatch, processUntilCaughtUp } from "../src/consumer.js";
 import type pg from "pg";
@@ -170,6 +176,26 @@ describe("api", () => {
     expect(unknown.status).toBe(404);
     const withoutDemo = await createApp(testPool).request("/api/demo/pause", { method: "POST" });
     expect(withoutDemo.status).toBe(404);
+  });
+
+  it("serves a delivery ledger row so the duplicate can be shown as a fact", async () => {
+    await demo("replay-duplicate");
+    await processUntilCaughtUp(testPool);
+    const late = fixture.deliveries[fixture.late_cancellation_offset - 1];
+
+    const duplicate = await getJson<DeliveryRecord>(`/api/deliveries/${fixture.duplicate_offset}`);
+    expect(duplicate).toEqual({
+      source_offset: fixture.duplicate_offset,
+      source_received_at: fixture.deliveries[fixture.duplicate_offset - 1]?.source_received_at,
+      event_id: late?.event_id,
+      result: "duplicate",
+      result_detail: null,
+      first_source_offset: fixture.late_cancellation_offset,
+    });
+    const pending = await getJson<DeliveryRecord>(`/api/deliveries/${fixture.conflict_offset}`);
+    expect(pending).toMatchObject({ result: "pending", first_source_offset: null });
+    expect((await app.request("/api/deliveries/99999")).status).toBe(404);
+    expect((await app.request("/api/deliveries/zero")).status).toBe(400);
   });
 
   it("advance-reserve releases the whole reserve at once and never moves the head backwards", async () => {

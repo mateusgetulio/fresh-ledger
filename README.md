@@ -35,6 +35,8 @@ A cancellation effective in July arrives at source offset 3,501 on September 28.
 
 ![The guided demo panel beside the restated July row and its sentence](docs/guided-demo-step-4.png)
 
+![The duplicate step with the ledger row and the before and after table](docs/guided-demo-step-5.png)
+
 ### Guided demo
 
 Press "Start Guided Demo" in the dashboard header. It resets the database to the fixture, drains the consumer to checkpoint 3,000 and opens a five-step panel on the real dashboard. Each step says what is on the screen, why it matters, and carries one button that runs the real demo action: pause and release the reserve, catch up, inject the late cancellation, replay the duplicate. Every restart produces the same checkpoints, values, backlog, restatements and duplicate result, so it can be rehearsed and recorded without the terminal. The step lives in the URL hash, so a reload keeps the place.
@@ -43,7 +45,7 @@ Press "Start Guided Demo" in the dashboard header. It resets the database to the
 2. The source moves, but the dashboard does not pretend: Delayed, 3,000 of 3,500, 500 pending, cards unchanged. "Catch up" resumes.
 3. Watch the checkpoint catch up: the banner counts 3,100, 3,200 and so on until Current again. "Inject a late cancellation" releases offset 3,501.
 4. A late event changes the month where it actually happened: still Current at 3,501, July restated. "Show history" highlights the July row and its two sentences under one line: arrived now, happened in July, recorded in July.
-5. Deliver the same event twice: "Replay duplicate event" moves the checkpoint to 3,502 and nothing else moves. "Finish Demo" ends on a four-point summary.
+5. Deliver the same event twice: "Replay duplicate event" moves the checkpoint to 3,502 and nothing else moves. The panel proves it with the delivery ledger row for 3,502 (the same event id, classified duplicate, first applied at 3,501) and a before and after table of checkpoint, MRR, ARR, active subscribers and restatement count. "Finish Demo" ends on a four-point summary.
 
 The manual script, for the same beats with the plain demo controls:
 

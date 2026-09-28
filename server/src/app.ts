@@ -9,7 +9,7 @@ import {
   type DemoAction,
 } from "./demo.js";
 import type { Fixture } from "./fixture/generate.js";
-import { currentMetrics, metricsHistory, restatements } from "./metrics.js";
+import { currentMetrics, deliveryAt, metricsHistory, restatements } from "./metrics.js";
 
 export interface AppOptions {
   demo?: Fixture;
@@ -24,6 +24,12 @@ export function createApp(pool: pg.Pool, options: AppOptions = {}): Hono {
   app.get("/api/metrics/current", async (c) => c.json(await currentMetrics(pool)));
   app.get("/api/metrics/history", async (c) => c.json(await metricsHistory(pool)));
   app.get("/api/restatements", async (c) => c.json(await restatements(pool)));
+  app.get("/api/deliveries/:offset", async (c) => {
+    const offset = Number(c.req.param("offset"));
+    if (!Number.isInteger(offset) || offset < 1) return c.json({ error: "bad offset" }, 400);
+    const delivery = await deliveryAt(pool, offset);
+    return delivery ? c.json(delivery) : c.json({ error: `no delivery at offset ${offset}` }, 404);
+  });
 
   const fixture = options.demo;
   if (fixture) {

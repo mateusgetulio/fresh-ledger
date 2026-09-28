@@ -52,6 +52,15 @@ export interface DemoState {
   consumer_paused: boolean;
 }
 
+export interface DeliveryRecord {
+  source_offset: number;
+  source_received_at: string;
+  event_id: string;
+  result: "pending" | "applied" | "duplicate" | "conflict";
+  result_detail: string | null;
+  first_source_offset: number | null;
+}
+
 export interface DemoOffsets {
   initial_head: number;
   reserve_end: number;

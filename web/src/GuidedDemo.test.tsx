@@ -122,6 +122,15 @@ function stubSource() {
         return json(current(source));
       }
       if (path === "/api/metrics/history") return json(history(source));
+      if (path === `/api/deliveries/${OFFSETS.duplicate_offset}`)
+        return json({
+          source_offset: OFFSETS.duplicate_offset,
+          source_received_at: "2026-09-28T14:05:01.000Z",
+          event_id: "evt_03982",
+          result: "duplicate",
+          result_detail: null,
+          first_source_offset: OFFSETS.late_cancellation_offset,
+        });
       if (path === "/api/restatements") return json(restatements(source));
       return json({}, 404);
     }),
@@ -217,6 +226,17 @@ describe("guided demo", () => {
     await tick(1000);
     expect(screen.getByRole("status")).toHaveTextContent("Current. Processed through offset 3,502");
     expect(screen.getByText(/delivered again at offset 3,502/)).toBeVisible();
+    expect(
+      screen.getByText(/Delivery 3,502 carried event evt_03982, already applied at offset 3,501/),
+    ).toHaveTextContent("Result: duplicate.");
+    expect(screen.getByRole("row", { name: /^Checkpoint/ })).toHaveTextContent("3,501");
+    expect(screen.getByRole("row", { name: /^Checkpoint/ })).toHaveTextContent("3,502");
+    expect(screen.getByRole("row", { name: /^MRR/ })).toHaveTextContent(
+      /17,934\.00\s*17,934\.00\s*unchanged/,
+    );
+    expect(screen.getByRole("row", { name: /^Restatements/ })).toHaveTextContent(
+      /1\s*1\s*unchanged/,
+    );
     expect(screen.getByRole("heading", { name: "MRR" }).nextElementSibling).toHaveTextContent(
       "17,934.00",
     );

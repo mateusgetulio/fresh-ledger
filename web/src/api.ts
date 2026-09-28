@@ -1,5 +1,6 @@
 import type {
   CurrentMetrics,
+  DeliveryRecord,
   DemoAction,
   DemoInfo,
   DemoState,
@@ -36,6 +37,10 @@ export async function fetchDashboard(): Promise<DashboardData> {
 
 export function postDemoAction(action: DemoAction): Promise<DemoState> {
   return postJson<DemoState>(`/api/demo/${action}`);
+}
+
+export function fetchDelivery(offset: number): Promise<DeliveryRecord> {
+  return getJson<DeliveryRecord>(`/api/deliveries/${offset}`);
 }
 
 export function fetchDemoInfo(): Promise<DemoInfo> {

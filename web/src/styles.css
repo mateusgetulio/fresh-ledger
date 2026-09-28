@@ -326,3 +326,27 @@ li.highlight {
     max-height: 320px;
   }
 }
+
+.evidence-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0 10px;
+  font-size: 0.88rem;
+}
+
+.evidence-table th,
+.evidence-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.evidence-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.evidence-table tr[data-changed="true"] th {
+  color: var(--current);
+}
