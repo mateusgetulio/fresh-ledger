@@ -21,6 +21,7 @@ export interface Fixture {
   initial_head: number;
   reserve_end: number;
   late_cancellation_offset: number;
+  late_cancellation_period: string;
   duplicate_offset: number;
   deliveries: FixtureDelivery[];
 }
@@ -35,6 +36,7 @@ export const PLANS: Fixture["plans"] = [
 const BUSINESS_START = Date.UTC(2025, 9, 1);
 const BUSINESS_END = Date.UTC(2026, 8, 27);
 const DAY = 86_400_000;
+const MAX_RECEIPT_DELAY = 2 * DAY;
 const SUBSCRIBERS = 800;
 const INITIAL = 3000;
 const RESERVE = 500;
@@ -76,7 +78,7 @@ export function generateFixture(seed: number): Fixture {
         type,
         ...(type === "subscription.cancelled" ? {} : { plan_id: plan }),
         effective: at,
-        received: at + Math.floor(random() * 2 * DAY),
+        received: at + Math.floor(random() * MAX_RECEIPT_DELAY),
       };
       drafts.push(draft);
       lastEventBySubscriber.set(subscriber, draft);
@@ -91,22 +93,25 @@ export function generateFixture(seed: number): Fixture {
   const trimmed = drafts.slice(0, INITIAL + RESERVE);
   const lastReceived = trimmed.at(-1)?.received ?? BUSINESS_END;
 
-  const candidates = [...lastEventBySubscriber.values()].filter(
-    (d) =>
-      d.type !== "subscription.cancelled" &&
-      d.effective < Date.UTC(2026, 7, 1) &&
-      trimmed.includes(d),
-  );
-  const lateTarget = pick(
-    random,
-    candidates.sort((a, b) => a.subscriber_id.localeCompare(b.subscriber_id)),
-  );
+  const receiptOfLast = new Date(lastReceived);
+  const lateMonth = Date.UTC(receiptOfLast.getUTCFullYear(), receiptOfLast.getUTCMonth() - 1, 1);
+  const lateEffective = lateMonth + 16 * DAY + 9.5 * 3_600_000;
+  const trimmedIds = new Set(trimmed.map((d) => d.event_id));
+  const candidates = [...lastEventBySubscriber.values()]
+    .filter(
+      (d) =>
+        d.type !== "subscription.cancelled" &&
+        d.effective < lateMonth &&
+        trimmedIds.has(d.event_id),
+    )
+    .sort((a, b) => a.subscriber_id.localeCompare(b.subscriber_id));
+  const lateTarget = pick(random, candidates);
   const late: Draft = {
     event_id: id(),
     subscriber_id: lateTarget.subscriber_id,
     type: "subscription.cancelled",
-    effective: Date.UTC(2026, 7, 17, 9, 30),
-    received: Math.max(lastReceived, Date.UTC(2026, 8, 28, 14, 5)),
+    effective: lateEffective,
+    received: Math.max(lastReceived + 1000, Date.UTC(2026, 8, 28, 14, 5)),
   };
   const duplicateOf = trimmed[41];
   if (duplicateOf === undefined) throw new Error("fixture too small for the duplicate");
@@ -131,6 +136,7 @@ export function generateFixture(seed: number): Fixture {
     initial_head: INITIAL,
     reserve_end: INITIAL + RESERVE,
     late_cancellation_offset: INITIAL + RESERVE + 1,
+    late_cancellation_period: new Date(lateMonth).toISOString().slice(0, 7),
     duplicate_offset: INITIAL + RESERVE + 2,
     deliveries,
   };

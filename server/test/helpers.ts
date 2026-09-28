@@ -43,9 +43,11 @@ export async function insertEventsDirectly(deliveries: FixtureDelivery[]): Promi
   return ids;
 }
 
-export function delivery(
-  overrides: Partial<FixtureDelivery> & { payload?: Partial<FixtureDelivery["payload"]> } = {},
-): FixtureDelivery {
+type DeliveryOverrides = Omit<Partial<FixtureDelivery>, "payload"> & {
+  payload?: Partial<FixtureDelivery["payload"]>;
+};
+
+export function delivery(overrides: DeliveryOverrides = {}): FixtureDelivery {
   return {
     source_offset: 1,
     source_received_at: "2026-09-28T14:00:00.000Z",

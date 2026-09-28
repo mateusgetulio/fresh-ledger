@@ -25,7 +25,13 @@ describe("fixture", () => {
       (d) => d.event_id === duplicate?.event_id && d.source_offset < fixture.duplicate_offset,
     );
     expect(late?.payload.type).toBe("subscription.cancelled");
-    expect(late?.payload.effective_at).toBe("2026-08-17T09:30:00.000Z");
+    expect(
+      late?.payload.effective_at.startsWith(`${fixture.late_cancellation_period}-17T09:30`),
+    ).toBe(true);
+    expect(
+      fixture.late_cancellation_period <
+        (fixture.deliveries[fixture.reserve_end - 1]?.source_received_at.slice(0, 7) ?? ""),
+    ).toBe(true);
     expect(late?.source_received_at.startsWith("2026-09-28")).toBe(true);
     expect(original).toBeDefined();
     expect(duplicate?.payload).toEqual(original?.payload);

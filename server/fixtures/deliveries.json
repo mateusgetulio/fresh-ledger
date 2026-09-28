@@ -29,6 +29,7 @@
  "initial_head": 3000,
  "reserve_end": 3500,
  "late_cancellation_offset": 3501,
+ "late_cancellation_period": "2026-07",
  "duplicate_offset": 3502,
  "deliveries": [
   {
@@ -37748,9 +37749,9 @@
    "source_received_at": "2026-09-28T14:05:00.000Z",
    "event_id": "evt_03982",
    "payload": {
-    "subscriber_id": "sub_0166",
+    "subscriber_id": "sub_0154",
     "type": "subscription.cancelled",
-    "effective_at": "2026-08-17T09:30:00.000Z"
+    "effective_at": "2026-07-17T09:30:00.000Z"
    }
   },
   {
