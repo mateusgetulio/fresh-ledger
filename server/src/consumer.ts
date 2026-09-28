@@ -55,7 +55,11 @@ export async function processBatch(pool: pg.Pool, batchSize = 100): Promise<Batc
       [checkpoint, batchSize, head],
     );
     const last = deliveries.at(-1);
-    if (last === undefined) throw new Error(`source has a gap after offset ${checkpoint}`);
+    const expected = Math.min(batchSize, head - checkpoint);
+    if (last === undefined || deliveries.length !== expected)
+      throw new Error(
+        `source has a gap after offset ${checkpoint}: expected ${expected} deliveries, found ${deliveries.length}`,
+      );
 
     const appliedEvents: { event_id: string; subscriber_id: string; effective_at: Date }[] = [];
     let duplicates = 0;
@@ -93,16 +97,11 @@ export async function processBatch(pool: pg.Pool, batchSize = 100): Promise<Batc
 
     const affected = [...new Set(appliedEvents.map((e) => e.subscriber_id))];
     await refoldSubscribers(client, affected);
-    const { rows: conflictRows } = await client.query<{ event_id: string; detail: string }>(
-      "SELECT c.event_id, c.detail FROM event_conflicts c JOIN events e ON e.event_id = c.event_id WHERE e.first_source_offset > $1 AND e.first_source_offset <= $2",
+    await syncDeliveryResults(client, affected);
+    const { rows: conflictCount } = await client.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM source_deliveries WHERE source_offset > $1 AND source_offset <= $2 AND result = 'conflict'",
       [checkpoint, last.source_offset],
     );
-    for (const conflict of conflictRows) {
-      await client.query(
-        "UPDATE source_deliveries SET result = 'conflict', result_detail = $2 WHERE event_id = $1 AND result = 'applied'",
-        [conflict.event_id, conflict.detail],
-      );
-    }
 
     const newCheckpoint = Number(last.source_offset);
     const restatements = await recomputeClosedMonths(
@@ -130,7 +129,7 @@ export async function processBatch(pool: pg.Pool, batchSize = 100): Promise<Batc
       checkpoint: newCheckpoint,
       applied: appliedEvents.length,
       duplicates,
-      conflicts: conflictRows.length,
+      conflicts: conflictCount[0]?.n ?? 0,
       restatements,
     });
   } catch (error) {
@@ -148,6 +147,24 @@ export async function processUntilCaughtUp(pool: pg.Pool, batchSize = 100): Prom
     results.push(result);
     if (result.outcome !== "processed") return results;
   }
+}
+
+async function syncDeliveryResults(client: pg.PoolClient, subscriberIds: string[]): Promise<void> {
+  if (subscriberIds.length === 0) return;
+  await client.query(
+    `UPDATE source_deliveries d SET result = 'conflict', result_detail = c.detail
+     FROM events e JOIN event_conflicts c ON c.event_id = e.event_id
+     WHERE d.source_offset = e.first_source_offset AND e.subscriber_id = ANY ($1::text[])
+       AND (d.result <> 'conflict' OR d.result_detail IS DISTINCT FROM c.detail)`,
+    [subscriberIds],
+  );
+  await client.query(
+    `UPDATE source_deliveries d SET result = 'applied', result_detail = NULL
+     FROM events e LEFT JOIN event_conflicts c ON c.event_id = e.event_id
+     WHERE d.source_offset = e.first_source_offset AND e.subscriber_id = ANY ($1::text[])
+       AND d.result = 'conflict' AND c.event_id IS NULL`,
+    [subscriberIds],
+  );
 }
 
 async function finish(client: pg.PoolClient, result: BatchResult): Promise<BatchResult> {
@@ -171,26 +188,38 @@ export function lastClosedMonth(checkpointReceivedAt: Date): Date {
   return new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() - 1, 1));
 }
 
+async function earliestMonthToCompute(
+  client: pg.PoolClient,
+  applied: { effective_at: Date }[],
+): Promise<Date | null> {
+  const { rows } = await client.query<{ known: string | null; first: Date | null }>(
+    "SELECT (SELECT max(period) FROM monthly_metrics) AS known, (SELECT min(effective_at) FROM events) AS first",
+  );
+  const bounds = rows[0];
+  if (bounds?.first == null) return null;
+  const firstUnknown = bounds.known
+    ? new Date(Date.UTC(Number(bounds.known.slice(0, 4)), Number(bounds.known.slice(5, 7)), 1))
+    : monthStart(bounds.first);
+  const touched = applied.map((e) => monthStart(e.effective_at).getTime());
+  const earliestTouched = touched.length > 0 ? new Date(Math.min(...touched)) : firstUnknown;
+  return earliestTouched < firstUnknown ? earliestTouched : firstUnknown;
+}
+
 async function recomputeClosedMonths(
   client: pg.PoolClient,
   checkpointReceivedAt: Date,
   checkpoint: number,
   applied: { event_id: string; effective_at: Date }[],
 ): Promise<number> {
-  const { rows: bounds } = await client.query<{ first: Date | null }>(
-    "SELECT min(effective_at) AS first FROM events",
-  );
-  const first = bounds[0]?.first;
-  if (!first) return 0;
-  const firstMonth = monthStart(first);
   const lastClosed = lastClosedMonth(checkpointReceivedAt);
-  if (lastClosed < firstMonth) return 0;
+  const earliest = await earliestMonthToCompute(client, applied);
+  if (earliest === null || earliest > lastClosed) return 0;
 
   const { rows: computed } = await client.query<{
     period: string;
     mrr: string;
     active_subscribers: number;
-  }>(monthlySql, [firstMonth.toISOString(), lastClosed.toISOString()]);
+  }>(monthlySql, [earliest.toISOString(), lastClosed.toISOString()]);
   const { rows: existing } = await client.query<{
     period: string;
     mrr: string;

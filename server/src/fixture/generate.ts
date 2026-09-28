@@ -135,20 +135,21 @@ export function generateFixture(seed: number): Fixture {
     effective: conflictTarget.effective - DAY,
     received: late.received + 2000,
   };
+  const duplicate: Draft = { ...late, received: late.received + 1000 };
 
-  const deliveries: FixtureDelivery[] = [...trimmed, late, late, conflict].map((draft, index) => ({
-    source_offset: index + 1,
-    source_received_at: new Date(
-      index >= trimmed.length ? late.received + (index - trimmed.length) * 1000 : draft.received,
-    ).toISOString(),
-    event_id: draft.event_id,
-    payload: {
-      subscriber_id: draft.subscriber_id,
-      type: draft.type,
-      ...(draft.plan_id ? { plan_id: draft.plan_id } : {}),
-      effective_at: new Date(draft.effective).toISOString(),
-    },
-  }));
+  const deliveries: FixtureDelivery[] = [...trimmed, late, duplicate, conflict].map(
+    (draft, index) => ({
+      source_offset: index + 1,
+      source_received_at: new Date(draft.received).toISOString(),
+      event_id: draft.event_id,
+      payload: {
+        subscriber_id: draft.subscriber_id,
+        type: draft.type,
+        ...(draft.plan_id ? { plan_id: draft.plan_id } : {}),
+        effective_at: new Date(draft.effective).toISOString(),
+      },
+    }),
+  );
 
   return {
     seed,

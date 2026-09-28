@@ -13,9 +13,24 @@ beforeAll(prepareDatabase);
 beforeEach(() => loadTestFixture());
 afterAll(() => testPool.end());
 
+interface SnapshotRow {
+  checkpoint_offset: number;
+  current_mrr: string;
+  current_arr: string;
+  active_subscribers: number;
+  conflicts: number;
+}
+
 async function snapshots() {
-  const { rows } = await testPool.query(
+  const { rows } = await testPool.query<SnapshotRow>(
     "SELECT checkpoint_offset::int AS checkpoint_offset, current_mrr::text AS current_mrr, current_arr::text AS current_arr, active_subscribers, conflicts FROM metric_snapshots ORDER BY checkpoint_offset",
+  );
+  return rows;
+}
+
+async function projections() {
+  const { rows } = await testPool.query(
+    "SELECT subscriber_id, status, plan_id, current_mrr::text AS current_mrr, last_effective_at, last_event_id, conflict_count FROM subscriber_projections ORDER BY subscriber_id",
   );
   return rows;
 }
@@ -48,7 +63,11 @@ describe("consumer", () => {
     expect(results_).toEqual([{ result: "applied", n: 3000 }]);
   });
 
-  it("INV-2 and INV-3 every snapshot reconciles to the projections and ARR is twelve times MRR, in SQL", async () => {
+  it("INV-2 and INV-3 every snapshot reconciles to the projections and the ledger fold, and ARR is twelve times MRR, in SQL", async () => {
+    const reconcile = loadSql("reconcile").replace(
+      "__SUBSCRIBER_STATES__",
+      loadSql("subscriber_states"),
+    );
     let previousMrr = "0.000000";
     for (let batch = 0; batch < 30; batch++) {
       const result = await processBatch(testPool);
@@ -76,13 +95,9 @@ describe("consumer", () => {
       });
       expect(rows[0]?.snapshot_mrr).not.toBe(previousMrr);
       previousMrr = rows[0]?.snapshot_mrr ?? "";
+      const { rows: reconciled } = await testPool.query<{ reconciled: boolean }>(reconcile, [null]);
+      expect(reconciled[0]?.reconciled).toBe(true);
     }
-    const reconcile = loadSql("reconcile").replace(
-      "__SUBSCRIBER_STATES__",
-      loadSql("subscriber_states"),
-    );
-    const { rows } = await testPool.query(reconcile, [null]);
-    expect(rows[0]?.reconciled).toBe(true);
   });
 
   it("a paused consumer processes nothing and the checkpoint stays put while the head moves", async () => {
@@ -108,22 +123,32 @@ describe("consumer", () => {
     await setHead(fixture.late_cancellation_offset);
     await processUntilCaughtUp(testPool);
     const before = await snapshots();
+    const projectionsBefore = await projections();
     const { rows: restatementsBefore } = await testPool.query(
       "SELECT count(*)::int AS n FROM restatements",
+    );
+    const { rows: monthsBefore } = await testPool.query(
+      "SELECT period, mrr::text AS mrr, active_subscribers, computed_at_checkpoint::int AS at FROM monthly_metrics ORDER BY period",
     );
 
     await setHead(fixture.duplicate_offset);
     const result = await processBatch(testPool);
 
-    expect(result).toMatchObject({
+    expect(result).toEqual({
       outcome: "processed",
       checkpoint: fixture.duplicate_offset,
       applied: 0,
       duplicates: 1,
+      conflicts: 0,
       restatements: 0,
     });
     const after = await snapshots();
     expect(after.at(-1)).toEqual({ ...before.at(-1), checkpoint_offset: fixture.duplicate_offset });
+    expect(await projections()).toEqual(projectionsBefore);
+    const { rows: monthsAfter } = await testPool.query(
+      "SELECT period, mrr::text AS mrr, active_subscribers, computed_at_checkpoint::int AS at FROM monthly_metrics ORDER BY period",
+    );
+    expect(monthsAfter).toEqual(monthsBefore);
     const duplicate = fixture.deliveries[fixture.duplicate_offset - 1];
     const { rows: deliveries } = await testPool.query(
       "SELECT source_offset::int AS o, result FROM source_deliveries WHERE event_id = $1 ORDER BY source_offset",
@@ -173,10 +198,11 @@ describe("consumer", () => {
       "SELECT mrr::text AS mrr, active_subscribers FROM monthly_metrics WHERE period = $1",
       [period],
     );
-    expect(Number(augustBefore[0]?.mrr) - Number(augustAfter[0]?.mrr)).toBeCloseTo(
-      Number(subscriber[0]?.mrr),
-      5,
+    const { rows: expectedMrr } = await testPool.query<{ mrr: string }>(
+      "SELECT ($1::numeric - $2::numeric)::numeric(18,6)::text AS mrr",
+      [augustBefore[0]?.mrr, subscriber[0]?.mrr],
     );
+    expect(augustAfter[0]?.mrr).toBe(expectedMrr[0]?.mrr);
     expect(
       (augustBefore[0]?.active_subscribers ?? 0) - (augustAfter[0]?.active_subscribers ?? 0),
     ).toBe(1);
@@ -347,11 +373,126 @@ describe("consumer", () => {
     });
   });
 
-  it("a batch that cannot commit leaves no events, no results and no checkpoint change", async () => {
-    await testPool.query(
-      "INSERT INTO metric_snapshots (checkpoint_offset, checkpoint_source_received_at, current_mrr, current_arr, active_subscribers) VALUES (100, now(), 1, 12, 1)",
+  it("a late earlier event reclassifies an older delivery, and the delivery ledger, the fold and the snapshot agree", async () => {
+    await loadFixture(
+      testPool,
+      {
+        ...fixture,
+        initial_head: 1,
+        deliveries: [
+          delivery({
+            source_offset: 1,
+            event_id: "orphan_change",
+            source_received_at: "2026-09-01T00:00:00.000Z",
+            payload: {
+              type: "subscription.plan_changed",
+              plan_id: "pro_monthly",
+              effective_at: "2026-06-10T00:00:00.000Z",
+            },
+          }),
+          delivery({
+            source_offset: 2,
+            event_id: "late_start",
+            source_received_at: "2026-09-02T00:00:00.000Z",
+            payload: { effective_at: "2026-06-01T00:00:00.000Z" },
+          }),
+        ],
+      },
+      1,
     );
-    await testPool.query("DELETE FROM metric_snapshots WHERE checkpoint_offset = 100");
+    expect(await processBatch(testPool)).toMatchObject({ checkpoint: 1, conflicts: 1 });
+    expect((await snapshots()).at(-1)).toMatchObject({ checkpoint_offset: 1, conflicts: 1 });
+
+    await setHead(2);
+    expect(await processBatch(testPool)).toEqual({
+      outcome: "processed",
+      checkpoint: 2,
+      applied: 1,
+      duplicates: 0,
+      conflicts: 0,
+      restatements: 6,
+    });
+    const { rows: restated } = await testPool.query(
+      "SELECT period, metric, new_value::text AS new_value, cause_event_id FROM restatements ORDER BY period, metric",
+    );
+    expect(restated).toEqual(
+      ["2026-06", "2026-07", "2026-08"].flatMap((period) => [
+        {
+          period,
+          metric: "active_subscribers",
+          new_value: "1.000000",
+          cause_event_id: "late_start",
+        },
+        { period, metric: "mrr", new_value: "50.000000", cause_event_id: "late_start" },
+      ]),
+    );
+
+    const { rows: deliveries } = await testPool.query(
+      "SELECT source_offset::int AS o, result, result_detail FROM source_deliveries ORDER BY source_offset",
+    );
+    expect(deliveries).toEqual([
+      { o: 1, result: "applied", result_detail: null },
+      { o: 2, result: "applied", result_detail: null },
+    ]);
+    const { rows: conflicts } = await testPool.query("SELECT event_id FROM event_conflicts");
+    expect(conflicts).toEqual([]);
+    expect(
+      (await projections()).map((p) => [
+        p.status,
+        p.plan_id,
+        p.current_mrr,
+        p.last_event_id,
+        p.conflict_count,
+      ]),
+    ).toEqual([["active", "pro_monthly", "50.000000", "orphan_change", 0]]);
+    expect((await snapshots()).at(-1)).toEqual({
+      checkpoint_offset: 2,
+      current_mrr: "50.000000",
+      current_arr: "600.000000",
+      active_subscribers: 1,
+      conflicts: 0,
+    });
+  });
+
+  it("a batch touching only the provisional month recomputes no closed month", async () => {
+    await processUntilCaughtUp(testPool);
+    const { rows: monthsBefore } = await testPool.query(
+      "SELECT period, mrr::text AS mrr, active_subscribers, computed_at_checkpoint::int AS at FROM monthly_metrics ORDER BY period",
+    );
+    expect(monthsBefore.length).toBeGreaterThan(0);
+    const last = fixture.deliveries[fixture.initial_head - 1];
+    const provisional = last?.source_received_at.slice(0, 7);
+    await testPool.query("DELETE FROM source_deliveries WHERE source_offset > $1", [
+      fixture.initial_head,
+    ]);
+    await testPool.query(
+      "INSERT INTO source_deliveries (source_offset, source_received_at, event_id, payload) VALUES ($1, $2, $3, $4)",
+      [
+        fixture.initial_head + 1,
+        last?.source_received_at,
+        "provisional_start",
+        JSON.stringify({
+          subscriber_id: "sub_provisional",
+          type: "subscription.started",
+          plan_id: "pro_monthly",
+          effective_at: `${provisional}-02T00:00:00.000Z`,
+        }),
+      ],
+    );
+    await setHead(fixture.initial_head + 1);
+
+    expect(await processBatch(testPool)).toMatchObject({
+      checkpoint: fixture.initial_head + 1,
+      applied: 1,
+      restatements: 0,
+    });
+    const { rows: monthsAfter } = await testPool.query(
+      "SELECT period, mrr::text AS mrr, active_subscribers, computed_at_checkpoint::int AS at FROM monthly_metrics ORDER BY period",
+    );
+    expect(monthsAfter).toEqual(monthsBefore);
+  });
+
+  it("a batch that cannot commit leaves no events, no results and no checkpoint change", async () => {
     await testPool.query("UPDATE source_state SET head_offset = 100");
     const blocker = await testPool.connect();
     await blocker.query("BEGIN");
