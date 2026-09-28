@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import type { CurrentMetrics, Money } from "@fresh-ledger/shared";
 import { FreshnessBanner } from "./FreshnessBanner";
 import type { DashboardState } from "./dashboard";
@@ -54,10 +54,27 @@ describe("FreshnessBanner", () => {
     expect(banner).toHaveAttribute("data-status", "delayed");
   });
 
-  it("keeps the last snapshot visible while updating and after a failed refresh", () => {
+  it("keeps the last snapshot visible while updating, says Updating only when a refresh is slow, and keeps values after a failed refresh", () => {
+    vi.useFakeTimers();
     const { rerender } = render(<FreshnessBanner state={ready({}, "refreshing")} />);
     expect(screen.getByRole("status")).toHaveTextContent("Current. Processed through offset 3,000");
+    expect(screen.getByRole("status")).not.toHaveTextContent("Updating.");
+
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
     expect(screen.getByRole("status")).toHaveTextContent("Updating.");
+
+    rerender(<FreshnessBanner state={ready({})} />);
+    expect(screen.getByRole("status")).not.toHaveTextContent("Updating.");
+
+    rerender(<FreshnessBanner state={ready({}, "refreshing")} />);
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    rerender(<FreshnessBanner state={ready({})} />);
+    expect(screen.getByRole("status")).not.toHaveTextContent("Updating.");
+    vi.useRealTimers();
 
     rerender(<FreshnessBanner state={ready({}, "error")} />);
     expect(screen.getByRole("status")).toHaveTextContent(
