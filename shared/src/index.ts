@@ -9,6 +9,7 @@ export interface CurrentMetrics {
   source_head_offset: number;
   pending_deliveries: number;
   status: FreshnessStatus;
+  consumer_paused: boolean;
   conflicts: number;
   metrics: {
     mrr: Money;
@@ -35,6 +36,14 @@ export interface Restatement {
   cause_event_id: string;
   detected_at_checkpoint: number;
   sentence: string;
+}
+
+export type DemoAction =
+  "pause" | "resume" | "advance-source" | "inject-late-cancellation" | "replay-duplicate";
+
+export interface DemoState {
+  head_offset: number;
+  consumer_paused: boolean;
 }
 
 export function formatMoney(value: Money | string): string {
