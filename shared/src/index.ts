@@ -40,11 +40,29 @@ export interface Restatement {
 }
 
 export type DemoAction =
-  "pause" | "resume" | "advance-source" | "inject-late-cancellation" | "replay-duplicate";
+  | "pause"
+  | "resume"
+  | "advance-source"
+  | "advance-reserve"
+  | "inject-late-cancellation"
+  | "replay-duplicate";
 
 export interface DemoState {
   head_offset: number;
   consumer_paused: boolean;
+}
+
+export interface DemoOffsets {
+  initial_head: number;
+  reserve_end: number;
+  late_cancellation_offset: number;
+  duplicate_offset: number;
+}
+
+export interface DemoInfo {
+  offsets: DemoOffsets;
+  state: DemoState;
+  checkpoint_offset: number;
 }
 
 export function formatMoney(value: Money | string): string {

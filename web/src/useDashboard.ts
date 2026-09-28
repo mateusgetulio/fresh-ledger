@@ -8,6 +8,7 @@ export const POLL_INTERVAL_MS = 1000;
 export interface Dashboard {
   state: DashboardState;
   runDemoAction: (action: DemoAction) => Promise<void>;
+  refresh: () => Promise<void>;
 }
 
 export function useDashboard(intervalMs: number = POLL_INTERVAL_MS): Dashboard {
@@ -63,5 +64,5 @@ export function useDashboard(intervalMs: number = POLL_INTERVAL_MS): Dashboard {
     [refresh],
   );
 
-  return { state, runDemoAction };
+  return { state, runDemoAction, refresh };
 }

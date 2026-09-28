@@ -1,7 +1,13 @@
 import type { Restatement } from "@fresh-ledger/shared";
 import { formatCount } from "./format";
 
-export function RestatementsList({ restatements }: { restatements: Restatement[] }) {
+export function RestatementsList({
+  restatements,
+  highlightCheckpoint = null,
+}: {
+  restatements: Restatement[];
+  highlightCheckpoint?: number | null;
+}) {
   return (
     <section aria-labelledby="restatements-heading">
       <h2 id="restatements-heading">Restatements</h2>
@@ -10,7 +16,10 @@ export function RestatementsList({ restatements }: { restatements: Restatement[]
       ) : (
         <ol className="restatements">
           {restatements.map((r) => (
-            <li key={r.id}>
+            <li
+              key={r.id}
+              className={r.detected_at_checkpoint === highlightCheckpoint ? "highlight" : undefined}
+            >
               {r.sentence}{" "}
               <span className="meta">
                 Detected at checkpoint {formatCount(r.detected_at_checkpoint)}.

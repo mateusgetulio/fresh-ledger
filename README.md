@@ -33,7 +33,19 @@ The consumer is paused and the source has moved 500 deliveries ahead. Values do 
 
 A cancellation effective in July arrives at source offset 3,501 on September 28. The consumer stays Current, July is restated with the cause and the checkpoint that detected it, August closes for the first time already including it, and September is provisional.
 
-The script, about two minutes from `npm run reset` and `npm run dev`:
+![The guided demo panel beside the restated July row and its sentence](docs/guided-demo-step-4.png)
+
+### Guided demo
+
+Press "Start Guided Demo" in the dashboard header. It resets the database to the fixture, drains the consumer to checkpoint 3,000 and opens a five-step panel on the real dashboard. Each step says what is on the screen, why it matters, and carries one button that runs the real demo action: pause and release the reserve, catch up, inject the late cancellation, replay the duplicate. Every restart produces the same checkpoints, values, backlog, restatements and duplicate result, so it can be rehearsed and recorded without the terminal. The step lives in the URL hash, so a reload keeps the place.
+
+1. Every number tells you how fresh it is: Current at 3,000, 0 pending. "Simulate source moving ahead" pauses the consumer and releases the whole reserve.
+2. The source moves, but the dashboard does not pretend: Delayed, 3,000 of 3,500, 500 pending, cards unchanged. "Catch up" resumes.
+3. Watch the checkpoint catch up: the banner counts 3,100, 3,200 and so on until Current again. "Inject a late cancellation" releases offset 3,501.
+4. A late event changes the month where it actually happened: still Current at 3,501, July restated. "Show history" highlights the July row and its two sentences under one line: arrived now, happened in July, recorded in July.
+5. Deliver the same event twice: "Replay duplicate event" moves the checkpoint to 3,502 and nothing else moves. "Finish Demo" ends on a four-point summary.
+
+The manual script, for the same beats with the plain demo controls:
 
 1. Fresh database, consumer running. The dashboard reads Current, processed through offset 3,000, 0 pending. Every number carries the checkpoint it was computed at.
 2. Pause the consumer, then advance the source five times, which releases the whole reserve. The banner reads Delayed, processed through 3,000 of 3,500, 500 pending, and the values are unchanged. The source moved, we did not, and the dashboard says so.

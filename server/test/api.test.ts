@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import type { CurrentMetrics, MonthMetrics, Restatement } from "@fresh-ledger/shared";
+import type { CurrentMetrics, DemoInfo, MonthMetrics, Restatement } from "@fresh-ledger/shared";
 import { createApp } from "../src/app.js";
 import { processBatch, processUntilCaughtUp } from "../src/consumer.js";
 import type pg from "pg";
@@ -21,6 +21,23 @@ async function demo(action: string) {
   const response = await app.request(`/api/demo/${action}`, { method: "POST" });
   expect(response.status).toBe(200);
   return (await response.json()) as { head_offset: number; consumer_paused: boolean };
+}
+
+async function resetSnapshot() {
+  const response = await app.request("/api/demo/reset", { method: "POST" });
+  expect(response.status).toBe(200);
+  const info = (await response.json()) as DemoInfo;
+  const { rows: snapshots } = await testPool.query(
+    "SELECT checkpoint_offset::int AS checkpoint_offset, current_mrr::text AS mrr, current_arr::text AS arr, active_subscribers, conflicts FROM metric_snapshots ORDER BY checkpoint_offset",
+  );
+  const { rows: months } = await testPool.query(
+    "SELECT period, mrr::text AS mrr, active_subscribers, computed_at_checkpoint::int AS at FROM monthly_metrics ORDER BY period",
+  );
+  const { rows: restated } = await testPool.query(
+    "SELECT metric, period, previous_value::text AS previous_value, new_value::text AS new_value, cause_event_id, other_causes, detected_at_checkpoint::int AS at FROM restatements ORDER BY id",
+  );
+  const current = await getJson<CurrentMetrics>("/api/metrics/current");
+  return { info, snapshots, months, restated, current: { ...current, snapshot_id: 0 } };
 }
 
 describe("api", () => {
@@ -153,6 +170,43 @@ describe("api", () => {
     expect(unknown.status).toBe(404);
     const withoutDemo = await createApp(testPool).request("/api/demo/pause", { method: "POST" });
     expect(withoutDemo.status).toBe(404);
+  });
+
+  it("advance-reserve releases the whole reserve at once and never moves the head backwards", async () => {
+    expect(await demo("advance-reserve")).toEqual({
+      head_offset: fixture.reserve_end,
+      consumer_paused: false,
+    });
+    await demo("inject-late-cancellation");
+    expect(await demo("advance-reserve")).toEqual({
+      head_offset: fixture.late_cancellation_offset,
+      consumer_paused: false,
+    });
+  });
+
+  it("the guided demo reset restores the same caught-up starting state every time and reports the offsets", async () => {
+    await demo("pause");
+    await demo("advance-reserve");
+    await demo("inject-late-cancellation");
+
+    const first = await resetSnapshot();
+    await demo("advance-reserve");
+    await processUntilCaughtUp(testPool);
+    const second = await resetSnapshot();
+
+    expect(first.info).toEqual({
+      offsets: {
+        initial_head: fixture.initial_head,
+        reserve_end: fixture.reserve_end,
+        late_cancellation_offset: fixture.late_cancellation_offset,
+        duplicate_offset: fixture.duplicate_offset,
+      },
+      state: { head_offset: fixture.initial_head, consumer_paused: false },
+      checkpoint_offset: fixture.initial_head,
+    });
+    expect(second).toEqual(first);
+    expect(first.current).toMatchObject({ checkpoint_offset: 3000, status: "current" });
+    expect(await getJson("/api/demo")).toEqual(first.info);
   });
 
   it("INV-9 after the late cancellation the API is current, the closed month is marked restated and the provisional month reflects it", async () => {

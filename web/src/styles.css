@@ -177,3 +177,152 @@ table.history tr[data-state="provisional"] {
   color: var(--unavailable);
   margin: 12px 0 0;
 }
+
+.page > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.page > header button {
+  flex: none;
+  padding: 8px 14px;
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.page > header button.primary,
+.guided button.primary {
+  background: var(--ink);
+  color: var(--card);
+}
+
+.page > header button:disabled,
+.guided button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.quiet {
+  background: transparent;
+  color: var(--muted);
+  border-color: var(--line);
+}
+
+.page.in-guided {
+  padding-right: 400px;
+}
+
+.guided {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  top: 16px;
+  width: 360px;
+  overflow: auto;
+  background: var(--card);
+  border: 2px solid var(--current);
+  border-radius: 8px;
+  padding: 16px 18px;
+  box-shadow: 0 8px 24px rgba(27, 31, 36, 0.12);
+}
+
+.guided h2 {
+  font-size: 1.1rem;
+  margin: 0 0 8px;
+}
+
+.guided h3 {
+  margin: 14px 0 4px;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.guided p {
+  margin: 0 0 6px;
+}
+
+.guided-step {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--current);
+}
+
+.guided-line {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border-left: 4px solid var(--current);
+  background: var(--current-bg);
+  font-weight: 700;
+}
+
+.guided button {
+  padding: 8px 14px;
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.guided-primary {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+}
+
+.guided-nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.guided-nav .quiet {
+  margin-left: auto;
+}
+
+.guided-finish {
+  position: static;
+  width: auto;
+  margin-top: 24px;
+}
+
+.guided-summary {
+  margin: 8px 0 16px;
+  padding-left: 20px;
+  line-height: 1.8;
+}
+
+tr.highlight,
+li.highlight {
+  background: var(--current-bg);
+  outline: 2px solid var(--current);
+}
+
+@media (max-width: 1100px) {
+  .page.in-guided {
+    padding-right: 16px;
+    padding-bottom: 360px;
+  }
+
+  .guided {
+    top: auto;
+    left: 16px;
+    right: 16px;
+    width: auto;
+    max-height: 320px;
+  }
+}

@@ -1,7 +1,13 @@
 import { formatMoney, type MonthMetrics } from "@fresh-ledger/shared";
 import { formatCount, formatPeriod } from "./format";
 
-export function HistoryTable({ history }: { history: MonthMetrics[] }) {
+export function HistoryTable({
+  history,
+  highlightPeriod = null,
+}: {
+  history: MonthMetrics[];
+  highlightPeriod?: string | null;
+}) {
   return (
     <section aria-labelledby="history-heading">
       <h2 id="history-heading">Monthly history</h2>
@@ -17,7 +23,11 @@ export function HistoryTable({ history }: { history: MonthMetrics[] }) {
         </thead>
         <tbody>
           {[...history].reverse().map((month) => (
-            <tr key={month.period} data-state={month.state}>
+            <tr
+              key={month.period}
+              data-state={month.state}
+              className={month.period === highlightPeriod ? "highlight" : undefined}
+            >
               <th scope="row">{formatPeriod(month.period)}</th>
               <td className="num">{formatMoney(month.mrr)}</td>
               <td className="num">{formatCount(month.active_subscribers)}</td>

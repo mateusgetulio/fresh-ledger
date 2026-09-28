@@ -1,6 +1,7 @@
 import type {
   CurrentMetrics,
   DemoAction,
+  DemoInfo,
   DemoState,
   MonthMetrics,
   Restatement,
@@ -18,6 +19,12 @@ async function getJson<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function postJson<T>(path: string): Promise<T> {
+  const response = await fetch(path, { method: "POST" });
+  if (!response.ok) throw new Error(`${path} answered ${response.status}`);
+  return (await response.json()) as T;
+}
+
 export async function fetchDashboard(): Promise<DashboardData> {
   const [current, history, restatements] = await Promise.all([
     getJson<CurrentMetrics>("/api/metrics/current"),
@@ -27,8 +34,14 @@ export async function fetchDashboard(): Promise<DashboardData> {
   return { current, history, restatements };
 }
 
-export async function postDemoAction(action: DemoAction): Promise<DemoState> {
-  const response = await fetch(`/api/demo/${action}`, { method: "POST" });
-  if (!response.ok) throw new Error(`demo action ${action} answered ${response.status}`);
-  return (await response.json()) as DemoState;
+export function postDemoAction(action: DemoAction): Promise<DemoState> {
+  return postJson<DemoState>(`/api/demo/${action}`);
+}
+
+export function fetchDemoInfo(): Promise<DemoInfo> {
+  return getJson<DemoInfo>("/api/demo");
+}
+
+export function resetDemo(): Promise<DemoInfo> {
+  return postJson<DemoInfo>("/api/demo/reset");
 }
