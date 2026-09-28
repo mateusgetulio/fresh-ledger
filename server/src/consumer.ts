@@ -219,18 +219,23 @@ interface AppliedEvent {
   effective_at: Date;
 }
 
-const MOVES_ACTIVE_COUNT = new Set(["subscription.started", "subscription.cancelled"]);
+function canMove(type: string, metric: "mrr" | "active_subscribers", direction: "up" | "down") {
+  if (type === "subscription.started") return direction === "up";
+  if (type === "subscription.cancelled") return direction === "down";
+  return metric === "mrr";
+}
 
 export function restatementCause(
   applied: AppliedEvent[],
   metric: "mrr" | "active_subscribers",
   period: string,
+  direction: "up" | "down",
 ): { event_id: string; other_causes: number } | null {
   const periodStart = new Date(
     Date.UTC(Number(period.slice(0, 4)), Number(period.slice(5, 7)) - 1, 1),
   );
   const periodEnd = new Date(Date.UTC(Number(period.slice(0, 4)), Number(period.slice(5, 7)), 1));
-  const able = applied.filter((e) => metric === "mrr" || MOVES_ACTIVE_COUNT.has(e.type));
+  const able = applied.filter((e) => canMove(e.type, metric, direction));
   const inside = able.filter((e) => e.effective_at >= periodStart && e.effective_at < periodEnd);
   const before = able.filter((e) => e.effective_at < periodEnd);
   const candidates = [...(inside.length > 0 ? inside : before)].sort(
@@ -280,7 +285,8 @@ async function recomputeClosedMonths(
           next: row.active_subscribers,
         });
       for (const change of changed) {
-        const cause = restatementCause(applied, change.metric, row.period);
+        const direction = Number(change.next) > Number(change.previous) ? "up" : "down";
+        const cause = restatementCause(applied, change.metric, row.period, direction);
         if (cause === null)
           throw new Error(`${change.metric} for ${row.period} changed without an applied event`);
         await client.query(
