@@ -43,7 +43,7 @@ Press "Start Guided Demo" in the dashboard header. It resets the database to the
 
 1. Every number tells you how fresh it is: Current at 3,000, 0 pending. "Simulate source moving ahead" pauses the consumer and releases the whole reserve.
 2. The source moves, but the dashboard does not pretend: Delayed, 3,000 of 3,500, 500 pending, cards unchanged. "Catch up" resumes.
-3. Watch the checkpoint catch up: the banner counts 3,100, 3,200 and so on until Current again. "Inject a late cancellation" releases offset 3,501.
+3. Watch the checkpoint catch up: the banner counts 3,100, 3,200 and so on until Current again. "Inject a late cancellation" releases offset 3,501; for one tick the banner honestly reads Delayed with 1 pending, then the batch commits.
 4. A late event changes the month where it actually happened: still Current at 3,501, July restated. "Show history" highlights the July row and its two sentences under one line: arrived now, happened in July, recorded in July.
 5. Deliver the same event twice: "Replay duplicate event" moves the checkpoint to 3,502 and nothing else moves. The panel proves it with the delivery ledger row for 3,502 (the same event id, classified duplicate, first applied at 3,501) and a before and after table of checkpoint, MRR, ARR, active subscribers and restatement count. "Finish Demo" ends on a four-point summary.
 

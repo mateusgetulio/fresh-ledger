@@ -142,7 +142,7 @@ export function guidedView(
               `Fresh Ledger updates ${month} instead of pretending the change belongs to the current month. The restatement records the old value, the new value, the event that caused the change and the checkpoint where it was detected.`,
             ]
           : [
-              `The late cancellation is being processed. The checkpoint will read ${formatCount(offsets.late_cancellation_offset)} and the dashboard stays current.`,
+              `The source just released one more delivery, offset ${formatCount(offsets.late_cancellation_offset)}. Until the next batch commits, the banner honestly says Delayed with 1 pending; a second later the checkpoint reads ${formatCount(offsets.late_cancellation_offset)} and the dashboard is Current again.`,
             ],
         why: [
           "Fresh Ledger separates when an event arrived from when the business event actually happened. Late data changes the period it belongs to.",
@@ -166,7 +166,7 @@ export function guidedView(
               `The same logical event was delivered again at offset ${formatCount(offsets.duplicate_offset)}. The source moved forward, but MRR, ARR, active subscribers and the restatements did not change.`,
             ]
           : [
-              "The same logical event will be delivered again under a new source offset. Watch the checkpoint move by one while every value stays where it is.",
+              `The source just released offset ${formatCount(offsets.duplicate_offset)}, the same logical event again. For a moment the banner says Delayed with 1 pending; the next batch classifies it as a duplicate and every value stays where it is.`,
             ],
         why: [
           "One logical event can be delivered more than once without changing the metrics twice.",
