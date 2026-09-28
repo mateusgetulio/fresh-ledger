@@ -207,7 +207,7 @@ describe("consumer", () => {
       (augustBefore[0]?.active_subscribers ?? 0) - (augustAfter[0]?.active_subscribers ?? 0),
     ).toBe(1);
     const { rows: restatements } = await testPool.query(
-      "SELECT metric, period, previous_value::text AS previous_value, new_value::text AS new_value, cause_event_id, detected_at_checkpoint::int AS at FROM restatements WHERE detected_at_checkpoint = $1 ORDER BY id",
+      "SELECT metric, period, previous_value::text AS previous_value, new_value::text AS new_value, cause_event_id, other_causes, detected_at_checkpoint::int AS at FROM restatements WHERE detected_at_checkpoint = $1 ORDER BY id",
       [fixture.late_cancellation_offset],
     );
     expect(restatements).toEqual([
@@ -217,6 +217,7 @@ describe("consumer", () => {
         previous_value: augustBefore[0]?.mrr,
         new_value: augustAfter[0]?.mrr,
         cause_event_id: late?.event_id,
+        other_causes: 0,
         at: fixture.late_cancellation_offset,
       },
       {
@@ -225,6 +226,7 @@ describe("consumer", () => {
         previous_value: `${augustBefore[0]?.active_subscribers}.000000`,
         new_value: `${augustAfter[0]?.active_subscribers}.000000`,
         cause_event_id: late?.event_id,
+        other_causes: 0,
         at: fixture.late_cancellation_offset,
       },
     ]);
@@ -234,6 +236,90 @@ describe("consumer", () => {
     );
     expect(earlier[0]?.n).toBe(0);
     expect(await currentCheckpoint(testPool)).toBe(fixture.late_cancellation_offset);
+  });
+
+  it("names the cause per metric: only events that can move a metric, effective inside the period, earliest first, with the other candidates counted", async () => {
+    await loadFixture(
+      testPool,
+      {
+        ...fixture,
+        initial_head: 2,
+        deliveries: [
+          delivery({
+            source_offset: 1,
+            event_id: "start_a",
+            source_received_at: "2026-08-01T00:00:00.000Z",
+            payload: {
+              subscriber_id: "sub_a",
+              plan_id: "pro_monthly",
+              effective_at: "2026-04-01T00:00:00.000Z",
+            },
+          }),
+          delivery({
+            source_offset: 2,
+            event_id: "start_b",
+            source_received_at: "2026-08-01T00:00:00.000Z",
+            payload: {
+              subscriber_id: "sub_b",
+              plan_id: "basic_monthly",
+              effective_at: "2026-04-01T00:00:00.000Z",
+            },
+          }),
+          delivery({
+            source_offset: 3,
+            event_id: "late_upgrade_b",
+            source_received_at: "2026-09-01T00:00:00.000Z",
+            payload: {
+              subscriber_id: "sub_b",
+              type: "subscription.plan_changed",
+              plan_id: "pro_monthly",
+              effective_at: "2026-06-05T00:00:00.000Z",
+            },
+          }),
+          delivery({
+            source_offset: 4,
+            event_id: "late_cancel_a",
+            source_received_at: "2026-09-01T00:00:00.000Z",
+            payload: {
+              subscriber_id: "sub_a",
+              type: "subscription.cancelled",
+              effective_at: "2026-06-20T00:00:00.000Z",
+            },
+          }),
+        ],
+      },
+      2,
+    );
+    await processUntilCaughtUp(testPool);
+    await setHead(4);
+    expect(await processBatch(testPool)).toMatchObject({ checkpoint: 4, applied: 2 });
+
+    const { rows } = await testPool.query(
+      "SELECT period, metric, new_value::text AS new_value, cause_event_id, other_causes FROM restatements WHERE period = '2026-06' ORDER BY metric",
+    );
+    expect(rows).toEqual([
+      {
+        period: "2026-06",
+        metric: "active_subscribers",
+        new_value: "1.000000",
+        cause_event_id: "late_cancel_a",
+        other_causes: 0,
+      },
+      {
+        period: "2026-06",
+        metric: "mrr",
+        new_value: "50.000000",
+        cause_event_id: "late_upgrade_b",
+        other_causes: 1,
+      },
+    ]);
+    const { rows: july } = await testPool.query(
+      "SELECT metric, cause_event_id, other_causes FROM restatements WHERE period = '2026-07' ORDER BY metric",
+    );
+    expect(july).toEqual([
+      { metric: "active_subscribers", cause_event_id: "late_cancel_a", other_causes: 0 },
+      { metric: "mrr", cause_event_id: "late_upgrade_b", other_causes: 1 },
+    ]);
   });
 
   it("months close as the checkpoint moves, and only events effective in a closed month can restate it", async () => {
@@ -307,7 +393,7 @@ describe("consumer", () => {
     expect(result).toMatchObject({
       outcome: "processed",
       checkpoint: 3,
-      applied: 3,
+      applied: 2,
       duplicates: 0,
       conflicts: 1,
     });
@@ -349,7 +435,7 @@ describe("consumer", () => {
     expect(result).toEqual({
       outcome: "processed",
       checkpoint: fixture.conflict_offset,
-      applied: 1,
+      applied: 0,
       duplicates: 0,
       conflicts: 1,
       restatements: 0,

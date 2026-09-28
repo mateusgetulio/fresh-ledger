@@ -46,14 +46,14 @@ export async function currentMetrics(db: Queryable): Promise<CurrentMetrics> {
   if (source === undefined) {
     return {
       ...base,
-      source_head_offset: checkpoint,
-      pending_deliveries: 0,
+      source_head_offset: null,
+      pending_deliveries: null,
       status: "unavailable",
       consumer_paused: false,
     };
   }
   const head = Number(source.head_offset);
-  const pending = Math.max(0, head - checkpoint);
+  const pending = head - checkpoint;
   return {
     ...base,
     source_head_offset: head,
@@ -63,7 +63,22 @@ export async function currentMetrics(db: Queryable): Promise<CurrentMetrics> {
   };
 }
 
-export async function metricsHistory(db: Queryable): Promise<MonthMetrics[]> {
+export async function metricsHistory(pool: pg.Pool): Promise<MonthMetrics[]> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const history = await readHistory(client);
+    await client.query("COMMIT");
+    return history;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function readHistory(db: Queryable): Promise<MonthMetrics[]> {
   const { rows: closed } = await db.query<{
     period: string;
     mrr: string;
@@ -107,7 +122,7 @@ export async function metricsHistory(db: Queryable): Promise<MonthMetrics[]> {
 export async function restatements(db: Queryable): Promise<Restatement[]> {
   const { rows } = await db.query<RestatementRow>(
     `SELECT r.id, r.metric, r.period, r.previous_value::text AS previous_value, r.new_value::text AS new_value,
-            r.cause_event_id, r.detected_at_checkpoint, e.type AS cause_type, e.effective_at AS cause_effective_at,
+            r.cause_event_id, r.other_causes, r.detected_at_checkpoint, e.type AS cause_type, e.effective_at AS cause_effective_at,
             e.first_source_offset AS cause_source_offset
      FROM restatements r JOIN events e ON e.event_id = r.cause_event_id
      ORDER BY r.id DESC`,
@@ -119,6 +134,7 @@ export async function restatements(db: Queryable): Promise<Restatement[]> {
     previous_value: row.previous_value as Money,
     new_value: row.new_value as Money,
     cause_event_id: row.cause_event_id,
+    other_causes: row.other_causes,
     detected_at_checkpoint: Number(row.detected_at_checkpoint),
     sentence: restatementSentence(row),
   }));

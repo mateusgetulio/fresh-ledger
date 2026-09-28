@@ -12,11 +12,10 @@ export interface Dashboard {
 
 export function useDashboard(intervalMs: number = POLL_INTERVAL_MS): Dashboard {
   const [state, dispatch] = useReducer(reduce, initialState);
-  const inFlight = useRef(false);
+  const inFlight = useRef<Promise<void> | null>(null);
+  const followUp = useRef<Promise<void> | null>(null);
 
-  const refresh = useCallback(async () => {
-    if (inFlight.current) return;
-    inFlight.current = true;
+  const refreshOnce = useCallback(async () => {
     dispatch({ type: "refresh_started" });
     try {
       dispatch({ type: "refresh_succeeded", data: await fetchDashboard() });
@@ -25,10 +24,30 @@ export function useDashboard(intervalMs: number = POLL_INTERVAL_MS): Dashboard {
         type: "refresh_failed",
         message: error instanceof Error ? error.message : String(error),
       });
-    } finally {
-      inFlight.current = false;
     }
   }, []);
+
+  const refresh = useCallback((): Promise<void> => {
+    const running = inFlight.current;
+    if (running === null) {
+      const started = refreshOnce().finally(() => {
+        if (inFlight.current === started) inFlight.current = null;
+      });
+      inFlight.current = started;
+      return started;
+    }
+    if (followUp.current === null) {
+      followUp.current = running.then(() => {
+        followUp.current = null;
+        const next = refreshOnce().finally(() => {
+          if (inFlight.current === next) inFlight.current = null;
+        });
+        inFlight.current = next;
+        return next;
+      });
+    }
+    return followUp.current;
+  }, [refreshOnce]);
 
   useEffect(() => {
     void refresh();

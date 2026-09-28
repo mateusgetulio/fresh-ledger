@@ -40,6 +40,7 @@ const restatements: Restatement[] = [
     previous_value: "80020.000000" as Money,
     new_value: "80000.000000" as Money,
     cause_event_id: "evt_1",
+    other_causes: 0,
     detected_at_checkpoint: 2900,
     sentence:
       "June 2026 MRR changed from 80,020.00 to 80,000.00. A cancellation effective Jun 17 arrived at source offset 2,850.",

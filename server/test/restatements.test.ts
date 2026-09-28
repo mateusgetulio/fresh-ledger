@@ -8,6 +8,7 @@ const row: RestatementRow = {
   previous_value: "70000.000000",
   new_value: "69900.000000",
   cause_event_id: "evt_1",
+  other_causes: 0,
   detected_at_checkpoint: "3501",
   cause_type: "subscription.cancelled",
   cause_effective_at: new Date("2026-08-17T09:30:00Z"),
@@ -39,6 +40,15 @@ describe("restatement sentence", () => {
     expect(
       restatementSentence({ ...row, cause_type: "subscription.plan_changed", period: "2025-12" }),
     ).toContain("December 2025 MRR changed from 70,000.00 to 69,900.00. A plan change effective");
+  });
+
+  it("counts the other candidate events in the same batch instead of crediting one event with everything", () => {
+    expect(restatementSentence({ ...row, other_causes: 1 })).toBe(
+      "August 2026 MRR changed from 70,000.00 to 69,900.00. A cancellation effective Aug 17 arrived at source offset 3,217, with 1 other event in the same batch.",
+    );
+    expect(restatementSentence({ ...row, other_causes: 3 })).toContain(
+      "offset 3,217, with 3 other events in the same batch.",
+    );
   });
 
   it("labels periods by month name and year", () => {

@@ -56,7 +56,7 @@ export function DemoPanel({
       <p className="meta">
         These buttons move a simulated source. They exist only outside production.
         {current
-          ? ` Source head ${formatCount(current.source_head_offset)}, consumer ${current.consumer_paused ? "paused" : "running"}.`
+          ? ` Source head ${current.source_head_offset === null ? "unknown" : formatCount(current.source_head_offset)}, consumer ${current.consumer_paused ? "paused" : "running"}.`
           : ""}
       </p>
       <ul className="controls">

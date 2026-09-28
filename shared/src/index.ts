@@ -6,8 +6,8 @@ export interface CurrentMetrics {
   snapshot_id: number;
   checkpoint_offset: number;
   checkpoint_source_received_at: string | null;
-  source_head_offset: number;
-  pending_deliveries: number;
+  source_head_offset: number | null;
+  pending_deliveries: number | null;
   status: FreshnessStatus;
   consumer_paused: boolean;
   conflicts: number;
@@ -34,6 +34,7 @@ export interface Restatement {
   previous_value: Money;
   new_value: Money;
   cause_event_id: string;
+  other_causes: number;
   detected_at_checkpoint: number;
   sentence: string;
 }

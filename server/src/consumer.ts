@@ -61,7 +61,7 @@ export async function processBatch(pool: pg.Pool, batchSize = 100): Promise<Batc
         `source has a gap after offset ${checkpoint}: expected ${expected} deliveries, found ${deliveries.length}`,
       );
 
-    const appliedEvents: { event_id: string; subscriber_id: string; effective_at: Date }[] = [];
+    const appliedEvents: AppliedEvent[] = [];
     let duplicates = 0;
     for (const d of deliveries) {
       const inserted = await client.query<{ event_id: string }>(
@@ -86,6 +86,7 @@ export async function processBatch(pool: pg.Pool, batchSize = 100): Promise<Batc
         appliedEvents.push({
           event_id: d.event_id,
           subscriber_id: d.payload.subscriber_id,
+          type: d.payload.type,
           effective_at: new Date(d.payload.effective_at),
         });
         await client.query(
@@ -98,17 +99,23 @@ export async function processBatch(pool: pg.Pool, batchSize = 100): Promise<Batc
     const affected = [...new Set(appliedEvents.map((e) => e.subscriber_id))];
     await refoldSubscribers(client, affected);
     await syncDeliveryResults(client, affected);
-    const { rows: conflictCount } = await client.query<{ n: number }>(
-      "SELECT count(*)::int AS n FROM source_deliveries WHERE source_offset > $1 AND source_offset <= $2 AND result = 'conflict'",
+    const { rows: outcomes } = await client.query<{ result: string; n: number }>(
+      "SELECT result, count(*)::int AS n FROM source_deliveries WHERE source_offset > $1 AND source_offset <= $2 GROUP BY result",
       [checkpoint, last.source_offset],
     );
+    const counted = (result: string) => outcomes.find((o) => o.result === result)?.n ?? 0;
+    const { rows: conflicted } = await client.query<{ event_id: string }>(
+      "SELECT event_id FROM event_conflicts WHERE event_id = ANY ($1::text[])",
+      [appliedEvents.map((e) => e.event_id)],
+    );
+    const conflictedIds = new Set(conflicted.map((c) => c.event_id));
 
     const newCheckpoint = Number(last.source_offset);
     const restatements = await recomputeClosedMonths(
       client,
       last.source_received_at,
       newCheckpoint,
-      appliedEvents,
+      appliedEvents.filter((e) => !conflictedIds.has(e.event_id)),
     );
 
     const { rows: totals } = await client.query<{ mrr: string; active: number; conflicts: number }>(
@@ -127,9 +134,9 @@ export async function processBatch(pool: pg.Pool, batchSize = 100): Promise<Batc
     return await finish(client, {
       outcome: "processed",
       checkpoint: newCheckpoint,
-      applied: appliedEvents.length,
+      applied: counted("applied"),
       duplicates,
-      conflicts: conflictCount[0]?.n ?? 0,
+      conflicts: counted("conflict"),
       restatements,
     });
   } catch (error) {
@@ -205,11 +212,40 @@ async function earliestMonthToCompute(
   return earliestTouched < firstUnknown ? earliestTouched : firstUnknown;
 }
 
+interface AppliedEvent {
+  event_id: string;
+  subscriber_id: string;
+  type: string;
+  effective_at: Date;
+}
+
+const MOVES_ACTIVE_COUNT = new Set(["subscription.started", "subscription.cancelled"]);
+
+export function restatementCause(
+  applied: AppliedEvent[],
+  metric: "mrr" | "active_subscribers",
+  period: string,
+): { event_id: string; other_causes: number } | null {
+  const periodStart = new Date(
+    Date.UTC(Number(period.slice(0, 4)), Number(period.slice(5, 7)) - 1, 1),
+  );
+  const periodEnd = new Date(Date.UTC(Number(period.slice(0, 4)), Number(period.slice(5, 7)), 1));
+  const able = applied.filter((e) => metric === "mrr" || MOVES_ACTIVE_COUNT.has(e.type));
+  const inside = able.filter((e) => e.effective_at >= periodStart && e.effective_at < periodEnd);
+  const before = able.filter((e) => e.effective_at < periodEnd);
+  const candidates = [...(inside.length > 0 ? inside : before)].sort(
+    (a, b) => a.effective_at.getTime() - b.effective_at.getTime(),
+  );
+  const first = candidates[0];
+  if (first === undefined) return null;
+  return { event_id: first.event_id, other_causes: candidates.length - 1 };
+}
+
 async function recomputeClosedMonths(
   client: pg.PoolClient,
   checkpointReceivedAt: Date,
   checkpoint: number,
-  applied: { event_id: string; effective_at: Date }[],
+  applied: AppliedEvent[],
 ): Promise<number> {
   const lastClosed = lastClosedMonth(checkpointReceivedAt);
   const earliest = await earliestMonthToCompute(client, applied);
@@ -230,30 +266,32 @@ async function recomputeClosedMonths(
   for (const row of computed) {
     const before = previous.get(row.period);
     if (before) {
-      const periodEnd = new Date(
-        Date.UTC(Number(row.period.slice(0, 4)), Number(row.period.slice(5, 7)), 1),
-      );
-      const cause =
-        applied
-          .filter((e) => e.effective_at < periodEnd)
-          .sort((a, b) => a.effective_at.getTime() - b.effective_at.getTime())[0] ?? applied[0];
-      if (before.mrr !== row.mrr) {
-        if (!cause) throw new Error(`month ${row.period} changed without an applied event`);
+      const changed: {
+        metric: "mrr" | "active_subscribers";
+        previous: string | number;
+        next: string | number;
+      }[] = [];
+      if (before.mrr !== row.mrr)
+        changed.push({ metric: "mrr", previous: before.mrr, next: row.mrr });
+      if (before.active_subscribers !== row.active_subscribers)
+        changed.push({
+          metric: "active_subscribers",
+          previous: before.active_subscribers,
+          next: row.active_subscribers,
+        });
+      for (const change of changed) {
+        const cause = restatementCause(applied, change.metric, row.period);
+        if (cause === null)
+          throw new Error(`${change.metric} for ${row.period} changed without an applied event`);
         await client.query(
-          "INSERT INTO restatements (metric, period, previous_value, new_value, cause_event_id, detected_at_checkpoint) VALUES ('mrr', $1, $2, $3, $4, $5)",
-          [row.period, before.mrr, row.mrr, cause.event_id, checkpoint],
-        );
-        restatements += 1;
-      }
-      if (before.active_subscribers !== row.active_subscribers) {
-        if (!cause) throw new Error(`month ${row.period} changed without an applied event`);
-        await client.query(
-          "INSERT INTO restatements (metric, period, previous_value, new_value, cause_event_id, detected_at_checkpoint) VALUES ('active_subscribers', $1, $2, $3, $4, $5)",
+          "INSERT INTO restatements (metric, period, previous_value, new_value, cause_event_id, other_causes, detected_at_checkpoint) VALUES ($1, $2, $3, $4, $5, $6, $7)",
           [
+            change.metric,
             row.period,
-            before.active_subscribers,
-            row.active_subscribers,
+            change.previous,
+            change.next,
             cause.event_id,
+            cause.other_causes,
             checkpoint,
           ],
         );

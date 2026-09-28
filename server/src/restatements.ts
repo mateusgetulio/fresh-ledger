@@ -7,6 +7,7 @@ export interface RestatementRow {
   previous_value: string;
   new_value: string;
   cause_event_id: string;
+  other_causes: number;
   detected_at_checkpoint: string;
   cause_type: "subscription.started" | "subscription.plan_changed" | "subscription.cancelled";
   cause_effective_at: Date;
@@ -46,5 +47,9 @@ export function restatementSentence(row: RestatementRow): string {
   const effective = row.cause_effective_at;
   const day = `${(MONTHS[effective.getUTCMonth()] ?? "").slice(0, 3)} ${effective.getUTCDate()}`;
   const offset = Number(row.cause_source_offset).toLocaleString("en-US");
-  return `${periodLabel(row.period)} ${metric} changed from ${value(row.previous_value)} to ${value(row.new_value)}. ${CAUSES[row.cause_type]} effective ${day} arrived at source offset ${offset}.`;
+  const others =
+    row.other_causes > 0
+      ? `, with ${row.other_causes} other event${row.other_causes === 1 ? "" : "s"} in the same batch`
+      : "";
+  return `${periodLabel(row.period)} ${metric} changed from ${value(row.previous_value)} to ${value(row.new_value)}. ${CAUSES[row.cause_type]} effective ${day} arrived at source offset ${offset}${others}.`;
 }

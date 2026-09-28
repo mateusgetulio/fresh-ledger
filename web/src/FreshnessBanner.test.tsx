@@ -67,7 +67,16 @@ describe("FreshnessBanner", () => {
   });
 
   it("names an unreadable source instead of claiming freshness", () => {
-    render(<FreshnessBanner state={ready({ status: "unavailable", conflicts: 1 })} />);
+    render(
+      <FreshnessBanner
+        state={ready({
+          status: "unavailable",
+          source_head_offset: null,
+          pending_deliveries: null,
+          conflicts: 1,
+        })}
+      />,
+    );
     expect(screen.getByRole("status")).toHaveTextContent(
       "Source unavailable. Values are from checkpoint 3,000; the source head could not be read. 1 semantic conflict excluded.",
     );

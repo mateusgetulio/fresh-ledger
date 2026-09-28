@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { CurrentMetrics, MonthMetrics, Restatement } from "@fresh-ledger/shared";
 import { createApp } from "../src/app.js";
 import { processBatch, processUntilCaughtUp } from "../src/consumer.js";
-import { currentMetrics } from "../src/metrics.js";
+import type pg from "pg";
 import { fixture, loadTestFixture, prepareDatabase, testPool } from "./helpers.js";
 
 beforeAll(prepareDatabase);
@@ -56,7 +56,7 @@ describe("api", () => {
     await testPool.query("UPDATE source_state SET head_offset = $1", [3250]);
 
     let interceptedOnce = false;
-    const racing = {
+    const racing = Object.assign(Object.create(testPool) as pg.Pool, {
       query: async (text: string, values?: unknown[]) => {
         const result = await testPool.query(text, values);
         if (!interceptedOnce && text.includes("FROM metric_snapshots")) {
@@ -67,9 +67,12 @@ describe("api", () => {
         }
         return result;
       },
-    } as Pick<import("pg").PoolClient, "query">;
+    }) as pg.Pool;
 
-    const current = await currentMetrics(racing);
+    const response = await createApp(racing).request("/api/metrics/current");
+    expect(response.status).toBe(200);
+    const current = (await response.json()) as CurrentMetrics;
+    expect(interceptedOnce).toBe(true);
 
     expect(current).toEqual({
       snapshot_id: Number(read.id),
