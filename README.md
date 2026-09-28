@@ -27,7 +27,7 @@ Fresh database, consumer running. Every card carries the checkpoint it was compu
 
 ![Delayed](docs/02-delayed.png)
 
-The consumer is paused and the source has moved 400 deliveries ahead. Values do not change, and the banner says Delayed with the pending count instead of pretending.
+The consumer is paused and the source has moved 500 deliveries ahead. Values do not change, and the banner says Delayed with the pending count instead of pretending.
 
 ![Restated](docs/03-restated.png)
 
@@ -36,9 +36,9 @@ A cancellation effective in July arrives at source offset 3,501 on September 28.
 The script, about two minutes from `npm run reset` and `npm run dev`:
 
 1. Fresh database, consumer running. The dashboard reads Current, processed through offset 3,000, 0 pending. Every number carries the checkpoint it was computed at.
-2. Pause the consumer, then advance the source four times. The banner reads Delayed, processed through 3,000 of 3,400, 400 pending, and the values are unchanged. The source moved, we did not, and the dashboard says so.
-3. Resume. The checkpoint climbs by 100 per second, values change, pending reaches 0, Current again.
-4. Inject the late cancellation. The consumer stays Current after one more batch. The restatements list gains two sentences for July 2026 (MRR and active subscribers), the July row carries the restated marker, and the provisional month reflects the cancellation. It arrived now, it happened in July, and it is recorded in July.
+2. Pause the consumer, then advance the source five times, which releases the whole reserve. The banner reads Delayed, processed through 3,000 of 3,500, 500 pending, and the values are unchanged. The source moved, we did not, and the dashboard says so.
+3. Resume. The checkpoint climbs by 100 per second, values change, pending reaches 0, Current again. The reserve carries ordinary late events of its own, so a few restatements detected at checkpoints up to 3,500 appear during this beat.
+4. Inject the late cancellation, which releases offset 3,501 alone. The consumer stays Current after one more batch of one delivery. The restatements list gains exactly two sentences for July 2026 (MRR and active subscribers) detected at checkpoint 3,501, the July row carries the restated marker, August closes for the first time already including the cancellation, and September is provisional. It arrived now, it happened in July, and it is recorded in July.
 5. Replay the duplicate. The checkpoint advances by one, no value moves, no restatement appears. One logical event, two deliveries, one effect.
 6. End on the invariants table below.
 
@@ -80,11 +80,11 @@ A crash before commit leaves nothing: the checkpoint is unchanged and the batch 
 
 ### Closed versus provisional months
 
-A month is closed when it is strictly before the month of the checkpoint delivery's `source_received_at`. The month containing the checkpoint is provisional and is served live from the projections. Closed months are recomputed in SQL and stored in `monthly_metrics` with the checkpoint they were computed at. Only closed months can be restated.
+A month is closed when it is strictly before the month of the checkpoint delivery's `source_received_at`. The month containing the checkpoint is provisional and is served from the latest snapshot, so its value and its checkpoint are the ones shown on the cards. Closed months are recomputed in SQL and stored in `monthly_metrics` with the checkpoint they were computed at. Only closed months can be restated.
 
 ### Restatements
 
-When a recompute changes a closed month's MRR or active subscriber count, the consumer writes a `restatements` row with the previous value, the new value, the cause (the applied event in that batch with the earliest `effective_at` touching that month) and the checkpoint that detected it. The API renders each row as a deterministic sentence: "July 2026 MRR changed from 17,626.00 to 17,606.00. A cancellation effective Jul 17 arrived at source offset 3,501." The cause rule is a heuristic when several late events land in one batch; it names the earliest one.
+When a recompute changes a closed month's MRR or active subscriber count, the consumer writes a `restatements` row with the previous value, the new value, a cause and the checkpoint that detected it. The cause is chosen per metric from the batch's applied, non-conflict events: only events that can move that metric in the direction it moved (a plan change cannot change the active count, a cancellation cannot raise it), preferring events effective inside the month over earlier ones whose state carries into it, earliest first. When more than one candidate touches the month, the row keeps the count and the sentence says so, because one event is rarely the whole story. The API renders each row as a deterministic sentence: "July 2026 MRR changed from 17,626.00 to 17,606.00. A cancellation effective Jul 17 arrived at source offset 3,501." or, with company, "... arrived at source offset 3,410, with 2 other events in the same batch."
 
 ### The snapshot as checkpoint and the live head
 
@@ -167,20 +167,20 @@ Why SQL and not a loop: a reconciliation is only convincing if it does not share
 
 ## Invariants
 
-| Id     | Statement                                                                                                                                                     | Owning test                                                                |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| INV-1  | Idempotent effect: the same `event_id` at two offsets yields one event, one applied and one duplicate delivery, identical projections and metrics.            | `server/test/consumer.test.ts`, "INV-1 and INV-8"                          |
-| INV-2  | Reconciliation: for every snapshot, `current_mrr` equals the sum over projections and the fold recomputed from events, in SQL.                                | `server/test/consumer.test.ts`, "INV-2 and INV-3"                          |
-| INV-3  | ARR derivation: `current_arr = current_mrr * 12` for every snapshot, in SQL.                                                                                  | `server/test/consumer.test.ts`, "INV-2 and INV-3"                          |
-| INV-4  | Checkpoint monotonic and bounded: each snapshot's checkpoint is greater than the previous and never above the head.                                           | `server/test/consumer.test.ts`, "INV-4"                                    |
-| INV-5  | No torn reads: values and checkpoint come from one snapshot row even when a newer snapshot lands mid-request; `pending = head - checkpoint`.                  | `server/test/api.test.ts`, "INV-5"                                         |
-| INV-6  | Fold determinism: any input order gives the same state; rebuilding every projection from the ledger reproduces the same rows, and SQL agrees with the fold.   | `server/test/fold.test.ts` and `server/test/projections.test.ts`, "INV-6"  |
-| INV-7  | Late-event restatement: the seeded late cancellation restates the closed month it belongs to with cause and checkpoint, and no other month.                   | `server/test/consumer.test.ts`, "INV-7 and INV-9"                          |
-| INV-8  | Duplicate does not restate: redelivering the late cancellation creates no event, no restatement, no projection change, and advances the checkpoint.           | `server/test/consumer.test.ts`, "INV-1 and INV-8"                          |
-| INV-9  | Late is not delayed: after the late cancellation the API is `current`, the closed month is marked restated and the provisional month reflects it.             | `server/test/api.test.ts`, "INV-9"                                         |
-| INV-10 | Delayed honesty: paused with the head advanced, the API never says `current`, values are unchanged, pending grows; the banner renders Delayed with the count. | `server/test/api.test.ts` and `web/src/FreshnessBanner.test.tsx`, "INV-10" |
-| INV-11 | Decimal correctness: an annual price that does not divide evenly (10,001 cents) still reconciles exactly in SQL.                                              | `server/test/projections.test.ts`, "INV-11"                                |
-| INV-12 | Conflict containment: a semantic conflict is classified, excluded from the fold, counted, and the checkpoint advances past it.                                | `server/test/fold.test.ts` and `server/test/consumer.test.ts`, "INV-12"    |
+| Id     | Statement                                                                                                                                                                 | Owning test                                                                |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| INV-1  | Idempotent effect: the same `event_id` at two offsets yields one event, one applied and one duplicate delivery, identical projections and metrics.                        | `server/test/consumer.test.ts`, "INV-1 and INV-8"                          |
+| INV-2  | Reconciliation: for every snapshot, `current_mrr` equals the sum over projections and the fold recomputed from events, in SQL.                                            | `server/test/consumer.test.ts`, "INV-2 and INV-3"                          |
+| INV-3  | ARR derivation: `current_arr = current_mrr * 12` for every snapshot, in SQL.                                                                                              | `server/test/consumer.test.ts`, "INV-2 and INV-3"                          |
+| INV-4  | Checkpoint monotonic and bounded: each snapshot's checkpoint is greater than the previous and never above the head.                                                       | `server/test/consumer.test.ts`, "INV-4"                                    |
+| INV-5  | No torn reads: values and checkpoint come from one snapshot row even when a newer snapshot lands mid-request; `pending = head - checkpoint`.                              | `server/test/api.test.ts`, "INV-5"                                         |
+| INV-6  | Fold determinism: any input order gives the same state; rebuilding every projection from the ledger reproduces the same rows, and SQL agrees with the fold.               | `server/test/fold.test.ts` and `server/test/projections.test.ts`, "INV-6"  |
+| INV-7  | Late-event restatement: the seeded late cancellation restates the closed month it belongs to with cause and checkpoint, and no other month; causes are chosen per metric. | `server/test/consumer.test.ts`, "INV-7 and INV-9"                          |
+| INV-8  | Duplicate does not restate: redelivering the late cancellation creates no event, no restatement, no projection change, and advances the checkpoint.                       | `server/test/consumer.test.ts`, "INV-1 and INV-8"                          |
+| INV-9  | Late is not delayed: after the late cancellation the API is `current`, the closed month is marked restated and the provisional month reflects it.                         | `server/test/api.test.ts`, "INV-9"                                         |
+| INV-10 | Delayed honesty: paused with the head advanced, the API never says `current`, values are unchanged, pending grows; the banner renders Delayed with the count.             | `server/test/api.test.ts` and `web/src/FreshnessBanner.test.tsx`, "INV-10" |
+| INV-11 | Decimal correctness: an annual price that does not divide evenly (10,001 cents) still reconciles exactly in SQL.                                                          | `server/test/projections.test.ts`, "INV-11"                                |
+| INV-12 | Conflict containment: a semantic conflict is classified, excluded from the fold, counted, and the checkpoint advances past it.                                            | `server/test/fold.test.ts` and `server/test/consumer.test.ts`, "INV-12"    |
 
 Server tests run against a real PostgreSQL. The generated fixture is seeded (`SEED=20260928`) and regenerates byte-identical; a test checks the committed file against a fresh generation.
 
