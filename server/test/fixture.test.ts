@@ -33,8 +33,20 @@ describe("fixture", () => {
         (fixture.deliveries[fixture.reserve_end - 1]?.source_received_at.slice(0, 7) ?? ""),
     ).toBe(true);
     expect(late?.source_received_at.startsWith("2026-09-28")).toBe(true);
-    expect(original).toBeDefined();
+    expect(original?.source_offset).toBe(fixture.late_cancellation_offset);
     expect(duplicate?.payload).toEqual(original?.payload);
+    const conflict = fixture.deliveries[fixture.conflict_offset - 1];
+    const earliestForSubscriber = fixture.deliveries
+      .filter(
+        (d) =>
+          d.source_offset <= fixture.reserve_end &&
+          d.payload.subscriber_id === conflict?.payload.subscriber_id,
+      )
+      .map((d) => d.payload.effective_at)
+      .sort()[0];
+    expect(conflict?.payload.type).toBe("subscription.plan_changed");
+    expect((conflict?.payload.effective_at ?? "") < (earliestForSubscriber ?? "")).toBe(true);
+    expect(fixture.conflict_offset).toBe(fixture.deliveries.length);
     const laterForSubscriber = fixture.deliveries.filter(
       (d) =>
         d.source_offset <= fixture.reserve_end &&

@@ -190,7 +190,7 @@ async function recomputeClosedMonths(
     period: string;
     mrr: string;
     active_subscribers: number;
-  }>(monthlySql, [firstMonth.toISOString().slice(0, 10), lastClosed.toISOString().slice(0, 10)]);
+  }>(monthlySql, [firstMonth.toISOString(), lastClosed.toISOString()]);
   const { rows: existing } = await client.query<{
     period: string;
     mrr: string;

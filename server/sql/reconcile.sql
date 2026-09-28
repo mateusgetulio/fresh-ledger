@@ -1,5 +1,3 @@
--- Three ways to compute current MRR that must agree:
--- the latest snapshot, the projection table, and a fold straight from the events ledger.
 WITH latest AS (
   SELECT current_mrr, active_subscribers FROM metric_snapshots ORDER BY checkpoint_offset DESC LIMIT 1
 ),

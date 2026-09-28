@@ -52,13 +52,23 @@ export async function refoldSubscribers(db: Queryable, subscriberIds: string[]):
   return conflictTotal;
 }
 
-export async function rebuildAllProjections(db: Queryable): Promise<void> {
-  const { rows } = await db.query<{ subscriber_id: string }>(
-    "SELECT DISTINCT subscriber_id FROM events",
-  );
-  await db.query("DELETE FROM subscriber_projections");
-  await refoldSubscribers(
-    db,
-    rows.map((r) => r.subscriber_id),
-  );
+export async function rebuildAllProjections(pool: pg.Pool): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<{ subscriber_id: string }>(
+      "SELECT DISTINCT subscriber_id FROM events",
+    );
+    await client.query("DELETE FROM subscriber_projections");
+    await refoldSubscribers(
+      client,
+      rows.map((r) => r.subscriber_id),
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }

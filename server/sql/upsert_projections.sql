@@ -1,4 +1,3 @@
--- Rebuild the projection rows for the given subscribers (NULL means all) from the events ledger.
 WITH states AS (
   __SUBSCRIBER_STATES__
 )

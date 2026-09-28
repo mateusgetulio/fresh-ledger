@@ -122,7 +122,6 @@ describe("fold", () => {
 
   it("INV-6 the fold is a pure function of the event set: any input order gives the same result", () => {
     const eventArb = fc.record({
-      event_id: fc.uuid(),
       type: fc.constantFrom(
         "subscription.started",
         "subscription.plan_changed",
@@ -137,11 +136,16 @@ describe("fold", () => {
     });
     fc.assert(
       fc.property(
-        fc.uniqueArray(eventArb, { minLength: 0, maxLength: 12, selector: (e) => e.event_id }),
+        fc.uniqueArray(eventArb, {
+          minLength: 0,
+          maxLength: 12,
+          selector: (e) => e.first_source_offset,
+        }),
         fc.nat(),
         (raw, rotate) => {
-          const events: LedgerEvent[] = raw.map((e) => ({
+          const events: LedgerEvent[] = raw.map((e, i) => ({
             ...e,
+            event_id: `e${i}`,
             subscriber_id: "s1",
             plan_id: e.type === "subscription.cancelled" ? null : "basic_monthly",
           }));

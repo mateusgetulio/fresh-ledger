@@ -18,9 +18,8 @@ export function readFixture(path: string = defaultPath): Fixture {
 
 export async function resetDatabase(pool: pg.Pool): Promise<void> {
   await pool.query(
-    "TRUNCATE restatements, monthly_metrics, subscriber_projections, event_conflicts, events, source_deliveries, plans RESTART IDENTITY CASCADE",
+    "TRUNCATE restatements, monthly_metrics, subscriber_projections, event_conflicts, events, source_deliveries, plans, metric_snapshots RESTART IDENTITY CASCADE",
   );
-  await pool.query("DELETE FROM metric_snapshots");
   await pool.query(
     "INSERT INTO metric_snapshots (checkpoint_offset, checkpoint_source_received_at, current_mrr, current_arr, active_subscribers) VALUES (0, NULL, 0, 0, 0)",
   );

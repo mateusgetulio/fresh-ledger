@@ -23,6 +23,7 @@ export interface Fixture {
   late_cancellation_offset: number;
   late_cancellation_period: string;
   duplicate_offset: number;
+  conflict_offset: number;
   deliveries: FixtureDelivery[];
 }
 
@@ -113,10 +114,29 @@ export function generateFixture(seed: number): Fixture {
     effective: lateEffective,
     received: Math.max(lastReceived + 1000, Date.UTC(2026, 8, 28, 14, 5)),
   };
-  const duplicateOf = trimmed[41];
-  if (duplicateOf === undefined) throw new Error("fixture too small for the duplicate");
+  const firstStarts = new Map<string, Draft>();
+  for (const d of trimmed) {
+    if (d.type !== "subscription.started" || d.subscriber_id === late.subscriber_id) continue;
+    const known = firstStarts.get(d.subscriber_id);
+    if (known === undefined || d.effective < known.effective) firstStarts.set(d.subscriber_id, d);
+  }
+  const conflictTarget = pick(
+    random,
+    [...firstStarts.values()].sort((a, b) => a.subscriber_id.localeCompare(b.subscriber_id)),
+  );
+  const conflict: Draft = {
+    event_id: id(),
+    subscriber_id: conflictTarget.subscriber_id,
+    type: "subscription.plan_changed",
+    plan_id: pick(
+      random,
+      PLANS.filter((p) => p.id !== conflictTarget.plan_id),
+    ).id,
+    effective: conflictTarget.effective - DAY,
+    received: late.received + 2000,
+  };
 
-  const deliveries: FixtureDelivery[] = [...trimmed, late, duplicateOf].map((draft, index) => ({
+  const deliveries: FixtureDelivery[] = [...trimmed, late, late, conflict].map((draft, index) => ({
     source_offset: index + 1,
     source_received_at: new Date(
       index >= trimmed.length ? late.received + (index - trimmed.length) * 1000 : draft.received,
@@ -138,6 +158,7 @@ export function generateFixture(seed: number): Fixture {
     late_cancellation_offset: INITIAL + RESERVE + 1,
     late_cancellation_period: new Date(lateMonth).toISOString().slice(0, 7),
     duplicate_offset: INITIAL + RESERVE + 2,
+    conflict_offset: INITIAL + RESERVE + 3,
     deliveries,
   };
 }

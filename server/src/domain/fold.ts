@@ -63,11 +63,9 @@ function step(state: FoldedState, event: LedgerEvent): FoldedState | string {
   switch (event.type) {
     case "subscription.started":
       if (state.status === "active") return "started while already active";
-      if (event.plan_id === null) return "started without a plan";
       return applied("active", event.plan_id);
     case "subscription.plan_changed":
       if (state.status === "inactive") return "plan changed while inactive";
-      if (event.plan_id === null) return "plan changed without a plan";
       return applied("active", event.plan_id);
     case "subscription.cancelled":
       return applied("inactive", null);

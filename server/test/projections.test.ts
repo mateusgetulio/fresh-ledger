@@ -79,6 +79,31 @@ describe("projections", () => {
     expect(conflicts).toEqual([{ event_id: "change", detail: "plan changed while inactive" }]);
   });
 
+  it("a subscriber whose only event is a conflict still gets an inactive projection row", async () => {
+    await insertEventsDirectly([
+      delivery({
+        event_id: "orphan_change",
+        source_offset: 1,
+        payload: {
+          type: "subscription.plan_changed",
+          plan_id: "pro_monthly",
+          effective_at: "2026-06-01T00:00:00.000Z",
+        },
+      }),
+    ]);
+    const rows = await projections();
+    expect(
+      rows.map((r) => [
+        r.subscriber_id,
+        r.status,
+        r.plan_id,
+        r.current_mrr,
+        r.last_event_id,
+        r.conflict_count,
+      ]),
+    ).toEqual([["sub_test", "inactive", null, "0.000000", null, 1]]);
+  });
+
   it("INV-6 rebuilding every projection from the ledger reproduces the same rows, and SQL agrees with the fold", async () => {
     const subscribers = await insertEventsDirectly(
       fixture.deliveries.slice(0, fixture.initial_head),
@@ -104,7 +129,8 @@ describe("projections", () => {
   it("refolding only the named subscribers leaves the others untouched", async () => {
     await insertEventsDirectly(fixture.deliveries.slice(0, 200));
     const before = await projections();
-    const first = before[0]?.subscriber_id as string;
+    const first = before[0]?.subscriber_id;
+    if (first === undefined) throw new Error("no projections to refold");
 
     await refoldSubscribers(testPool, [first]);
 

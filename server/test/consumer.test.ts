@@ -130,7 +130,7 @@ describe("consumer", () => {
       [duplicate?.event_id],
     );
     expect(deliveries).toEqual([
-      { o: 42, result: "applied" },
+      { o: fixture.late_cancellation_offset, result: "applied" },
       { o: fixture.duplicate_offset, result: "duplicate" },
     ]);
     const { rows: events } = await testPool.query(
@@ -148,13 +148,14 @@ describe("consumer", () => {
     await setHead(fixture.reserve_end);
     await processUntilCaughtUp(testPool);
     const period = fixture.late_cancellation_period;
+    const late = fixture.deliveries[fixture.late_cancellation_offset - 1];
     const { rows: augustBefore } = await testPool.query(
       "SELECT mrr::text AS mrr, active_subscribers FROM monthly_metrics WHERE period = $1",
       [period],
     );
     const { rows: subscriber } = await testPool.query(
       "SELECT current_mrr::text AS mrr FROM subscriber_projections WHERE subscriber_id = $1",
-      [fixture.deliveries[fixture.late_cancellation_offset - 1]?.payload.subscriber_id],
+      [late?.payload.subscriber_id],
     );
     expect(Number(subscriber[0]?.mrr)).toBeGreaterThan(0);
 
@@ -189,7 +190,7 @@ describe("consumer", () => {
         period,
         previous_value: augustBefore[0]?.mrr,
         new_value: augustAfter[0]?.mrr,
-        cause_event_id: "evt_03982",
+        cause_event_id: late?.event_id,
         at: fixture.late_cancellation_offset,
       },
       {
@@ -197,13 +198,13 @@ describe("consumer", () => {
         period,
         previous_value: `${augustBefore[0]?.active_subscribers}.000000`,
         new_value: `${augustAfter[0]?.active_subscribers}.000000`,
-        cause_event_id: "evt_03982",
+        cause_event_id: late?.event_id,
         at: fixture.late_cancellation_offset,
       },
     ]);
     const { rows: earlier } = await testPool.query(
-      "SELECT count(*)::int AS n FROM restatements WHERE period < $1",
-      [period],
+      "SELECT count(*)::int AS n FROM restatements WHERE detected_at_checkpoint = $1 AND period <> $2",
+      [fixture.late_cancellation_offset, period],
     );
     expect(earlier[0]?.n).toBe(0);
     expect(await currentCheckpoint(testPool)).toBe(fixture.late_cancellation_offset);
@@ -306,6 +307,46 @@ describe("consumer", () => {
     });
   });
 
+  it("INV-12 the seeded conflict delivery is a terminal conflict result and the checkpoint moves past it", async () => {
+    await setHead(fixture.duplicate_offset);
+    await processUntilCaughtUp(testPool);
+    const before = (await snapshots()).at(-1);
+    const conflict = fixture.deliveries[fixture.conflict_offset - 1];
+    const { rows: projectionBefore } = await testPool.query(
+      "SELECT status, plan_id, current_mrr::text AS mrr, last_event_id, conflict_count FROM subscriber_projections WHERE subscriber_id = $1",
+      [conflict?.payload.subscriber_id],
+    );
+
+    await setHead(fixture.conflict_offset);
+    const result = await processBatch(testPool);
+
+    expect(result).toEqual({
+      outcome: "processed",
+      checkpoint: fixture.conflict_offset,
+      applied: 1,
+      duplicates: 0,
+      conflicts: 1,
+      restatements: 0,
+    });
+    const { rows: deliveries } = await testPool.query(
+      "SELECT result, result_detail FROM source_deliveries WHERE source_offset = $1",
+      [fixture.conflict_offset],
+    );
+    expect(deliveries).toEqual([
+      { result: "conflict", result_detail: "plan changed while inactive" },
+    ]);
+    const { rows: projectionAfter } = await testPool.query(
+      "SELECT status, plan_id, current_mrr::text AS mrr, last_event_id, conflict_count FROM subscriber_projections WHERE subscriber_id = $1",
+      [conflict?.payload.subscriber_id],
+    );
+    expect(projectionAfter).toEqual([{ ...projectionBefore[0], conflict_count: 1 }]);
+    expect((await snapshots()).at(-1)).toEqual({
+      ...before,
+      checkpoint_offset: fixture.conflict_offset,
+      conflicts: 1,
+    });
+  });
+
   it("a batch that cannot commit leaves no events, no results and no checkpoint change", async () => {
     await testPool.query(
       "INSERT INTO metric_snapshots (checkpoint_offset, checkpoint_source_received_at, current_mrr, current_arr, active_subscribers) VALUES (100, now(), 1, 12, 1)",
@@ -326,7 +367,7 @@ describe("consumer", () => {
 
     const { rows: events } = await testPool.query("SELECT count(*)::int AS n FROM events");
     const { rows: processed } = await testPool.query(
-      "SELECT count(*)::int AS n FROM source_deliveries WHERE result IS NOT NULL",
+      "SELECT count(*)::int AS n FROM source_deliveries WHERE result <> 'pending'",
     );
     expect(events[0]?.n).toBe(0);
     expect(processed[0]?.n).toBe(0);

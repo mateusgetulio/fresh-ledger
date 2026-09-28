@@ -11,7 +11,7 @@ export function databaseUrl(): string {
 }
 
 export function createPool(url: string = databaseUrl()): pg.Pool {
-  return new pg.Pool({ connectionString: url, max: 5 });
+  return new pg.Pool({ connectionString: url, max: 5, options: "-c TimeZone=UTC" });
 }
 
 const sqlDir = join(dirname(fileURLToPath(import.meta.url)), "..", "sql");

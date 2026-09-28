@@ -17,7 +17,7 @@ CREATE TABLE source_deliveries (
   source_received_at timestamptz NOT NULL,
   event_id text NOT NULL,
   payload jsonb NOT NULL,
-  result text CHECK (result IN ('applied', 'duplicate', 'conflict')),
+  result text NOT NULL DEFAULT 'pending' CHECK (result IN ('pending', 'applied', 'duplicate', 'conflict')),
   result_detail text,
   processed_at timestamptz
 );
@@ -29,7 +29,8 @@ CREATE TABLE events (
   type text NOT NULL CHECK (type IN ('subscription.started', 'subscription.plan_changed', 'subscription.cancelled')),
   plan_id text REFERENCES plans (id),
   effective_at timestamptz NOT NULL,
-  first_source_offset bigint NOT NULL REFERENCES source_deliveries (source_offset)
+  first_source_offset bigint NOT NULL REFERENCES source_deliveries (source_offset),
+  CHECK ((type = 'subscription.cancelled') = (plan_id IS NULL))
 );
 CREATE INDEX events_subscriber_timeline ON events (subscriber_id, effective_at, first_source_offset);
 CREATE INDEX events_effective_at ON events (effective_at);

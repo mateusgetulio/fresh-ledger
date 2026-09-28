@@ -48,6 +48,7 @@ type DeliveryOverrides = Omit<Partial<FixtureDelivery>, "payload"> & {
 };
 
 export function delivery(overrides: DeliveryOverrides = {}): FixtureDelivery {
+  const type = overrides.payload?.type ?? "subscription.started";
   return {
     source_offset: 1,
     source_received_at: "2026-09-28T14:00:00.000Z",
@@ -55,8 +56,8 @@ export function delivery(overrides: DeliveryOverrides = {}): FixtureDelivery {
     ...overrides,
     payload: {
       subscriber_id: "sub_test",
-      type: "subscription.started",
-      plan_id: "basic_monthly",
+      type,
+      ...(type === "subscription.cancelled" ? {} : { plan_id: "basic_monthly" }),
       effective_at: "2026-09-01T00:00:00.000Z",
       ...overrides.payload,
     },

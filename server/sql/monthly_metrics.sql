@@ -1,9 +1,6 @@
--- Month-end MRR and active subscribers for every calendar month in [$1, $2] (first days of months),
--- reconstructed from the events ledger at the current checkpoint.
--- For each month end, the last non-conflict event per subscriber (by business time) decides its state.
 WITH months AS (
-  SELECT to_char(m, 'YYYY-MM') AS period, (m + interval '1 month') AS period_end
-  FROM generate_series($1::date, $2::date, interval '1 month') AS m
+  SELECT to_char(m AT TIME ZONE 'UTC', 'YYYY-MM') AS period, (m + interval '1 month') AS period_end
+  FROM generate_series($1::timestamptz, $2::timestamptz, interval '1 month') AS m
 ),
 state_at_month_end AS (
   SELECT
@@ -24,9 +21,9 @@ SELECT
   mo.period,
   coalesce(sum(
     CASE
-      WHEN sme.type = 'subscription.cancelled' THEN 0
-      WHEN p.cadence = 'annual' THEN p.price_cents::numeric / 100 / 12
-      ELSE p.price_cents::numeric / 100
+      WHEN sme.type = 'subscription.cancelled' THEN 0::numeric(18, 6)
+      WHEN p.cadence = 'annual' THEN (p.price_cents::numeric / 100 / 12)::numeric(18, 6)
+      ELSE (p.price_cents::numeric / 100)::numeric(18, 6)
     END
   ), 0)::numeric(18, 6) AS mrr,
   count(*) FILTER (WHERE sme.type <> 'subscription.cancelled')::int AS active_subscribers

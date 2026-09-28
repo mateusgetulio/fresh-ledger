@@ -7,7 +7,7 @@
     "dev": "vite --port 5174",
     "build": "vite build",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@fresh-ledger/shared": "0.0.0",
