@@ -157,6 +157,7 @@ export function guidedView(
     }
     case 5: {
       const replayed = isCurrent && checkpoint >= offsets.duplicate_offset;
+      const released = head >= offsets.duplicate_offset;
       return {
         ...base,
         step: 5,
@@ -165,9 +166,13 @@ export function guidedView(
           ? [
               `The same logical event was delivered again at offset ${formatCount(offsets.duplicate_offset)}. The source moved forward, but MRR, ARR, active subscribers and the restatements did not change.`,
             ]
-          : [
-              `The source just released offset ${formatCount(offsets.duplicate_offset)}, the same logical event again. For a moment the banner says Delayed with 1 pending; the next batch classifies it as a duplicate and every value stays where it is.`,
-            ],
+          : released
+            ? [
+                `The source just released offset ${formatCount(offsets.duplicate_offset)}, the same logical event again. For a moment the banner says Delayed with 1 pending; the next batch classifies it as a duplicate and every value stays where it is.`,
+              ]
+            : [
+                `The source will deliver the cancellation from offset ${formatCount(offsets.late_cancellation_offset)} a second time, under offset ${formatCount(offsets.duplicate_offset)}. Watch the checkpoint move by one while every value stays where it is.`,
+              ],
         why: [
           "One logical event can be delivered more than once without changing the metrics twice.",
         ],
